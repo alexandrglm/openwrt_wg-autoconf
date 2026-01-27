@@ -5,7 +5,20 @@ Ash CLI tool for automating WireGuard setup on OpenWrt routers, easily.
 ## Overview
 wg-autoconf is a command-line tool for automating WireGuard configuration on OpenWrt systems, by simplyfying the process of setting up WireGuard connections, managing network interfaces, and configuring routing policies.
 
-## Requirements
+## Installation
+
+### Latest Release
+1. Download [](latest release), copy *.apk and *.pub to your OpenWRT device.
+2. Make sure my public certificate is added: `# cp ./...rsa.pub.key /etc/apk/keys/...rsa.pub` and `# apk update`.
+3. `# apk install /path/to/wg-autoconf....apk`
+4. Usage at `# wg-autoconf --help`
+
+*See #### 2. WG .conf files:*
+
+---
+
+## Compiling from sources
+### Requirements
 
 #### 1. Dependences
 ```
