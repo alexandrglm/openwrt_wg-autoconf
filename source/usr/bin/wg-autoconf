@@ -1,0 +1,721 @@
+#!/bin/sh
+#
+# 2026-01-27
+#
+# wg-autoconf v.0.1 for OpenWRT
+# PATH: /usr/bin/wg-autoconf
+#
+
+
+WG_CONF_DIR="/etc/wireguard"
+NETWORK_CONF="/etc/config/network"
+BACKUP_DIR="/tmp/wg-backup"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+
+log() { echo -e "${BLUE}[wg-autoconf]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
+warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+
+
+#####################################################################
+# WG KEY HANDLER -> CLEANING
+clean_wg_key() {
+
+    local key="$1"
+
+    # 1. prefix - postfix
+    key=$(echo "$key" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+    # 2. line returns
+    key=$(echo "$key" | tr -d '\r\n')
+
+    # 3. PROTONVPN specific (+)
+    [ "${key:0:1}" = "+" ] && key="${key:1}"
+
+    # 4. Verify 44 chars
+    local len=${#key}
+    [ $len -eq 43 ] && key="${key}="
+
+    echo "$key"
+}
+
+
+#####################################################################
+# WG CONF HANDLER -> Extracting keys
+get_conf_value() {
+
+    local key="$1"
+    local file="$2"
+
+    grep "^$key[ \t]*=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^[ \t]*//;s/[ \t]*$//'
+}
+
+#####################################################################
+# WG/OpenWRT Network ALLOWED IPS -> NONE/'1'
+
+process_allowed_ips() {
+
+    local ips="$1"
+
+    # 1. CLEAN
+    ips=$(echo "$ips" | sed 's/^[ \t]*//;s/[ \t]+$//')
+
+    # 2. IPv6, commas
+    echo "$ips" | awk 'BEGIN {RS=","} {
+        gsub(/^[ \t]+|[ \t]+$/, "", $0)
+        if ($0 != "") print $0
+    }'
+}
+
+#####################################################################
+# WG-AUTOCONF usage, help
+show_usage() {
+
+    echo "WireGuard Auto-Config for OpenWrt"
+    echo "Usage: $0 <cmd> [args]"
+    echo ""
+    echo "Available commands:"
+    echo "  list                     - List all .conf files, default PATH=/etc/wireguard/*.conf"
+    echo "  setup <conf_name>        - Easy setup from desired .conf"
+    echo "  up <iface>               - Enable wg interface"
+    echo "  down <iface>             - Disable wg interace"
+    echo "  remove <iface>           - Delete wg interface"
+    echo "  status                   - Show wg status"
+    echo "  test <conf_name>         - Test .conf file previous to set up"
+    echo "  cleanup                  - Easy wg cleaning"
+    echo "  routes set <lan_iface>   - Set routes from desired LAN -> WireGuard"
+    echo "  routes unset <lan_iface> - Unset routes from desired LAN -> WireGuard"
+    echo "  routes show              - Show all configured routes"
+    echo ""
+    echo "Examples:"
+    echo "  $0 list"
+    echo "  $0 setup wg-conf"
+    echo "  $0 up wg0"
+    echo "  $0 routes set lan1"
+    echo "  $0 routes unset lan1"
+    exit 1
+}
+
+# WG-AUTOCONF list
+list_configs() {
+
+    log ".conf files on $WG_CONF_DIR:"
+    echo ""
+
+    for conf in "$WG_CONF_DIR"/*.conf; do
+        [ -f "$conf" ] || continue
+
+        name=$(basename "$conf" .conf)
+        endpoint=$(get_conf_value "Endpoint" "$conf")
+        address=$(get_conf_value "Address" "$conf")
+
+        echo "  $name"
+        [ -n "$address" ] && echo "    IP: $address"
+        [ -n "$endpoint" ] && echo "    Endpoint: $endpoint"
+        echo ""
+    done
+}
+
+
+
+#####################################################################
+# WG-AUTOCONF test
+test_config() {
+
+    local conf_name="$1"
+    local conf_file="$WG_CONF_DIR/$conf_name.conf"
+
+    [ -f "$conf_file" ] || error "[ERROR] $conf_file does not exist!"
+
+    log "Testing $conf_name.conf..."
+
+    # 1. EXTRACT VALUES (keys)
+    private_key_raw=$(get_conf_value "PrivateKey" "$conf_file")
+    public_key_raw=$(get_conf_value "PublicKey" "$conf_file")
+
+    [ -z "$private_key_raw" ] && error "PrivateKey NOT FOUND!"
+    [ -z "$public_key_raw" ] && error "PublicKey NOT FOUND!"
+
+    # 2. HANDLE VALUE (_clean(), keys)
+    private_key_clean=$(clean_wg_key "$private_key_raw")
+    public_key_clean=$(clean_wg_key "$public_key_raw")
+
+    echo ""
+    echo "=== RESULTS ==="
+    echo "Private Key: $private_key_clean"
+    echo "Public Key: $public_key_clean"
+    echo ""
+
+    # 3. COMPARING VALUES (keys)
+    echo "Testing wg keys ..."
+
+    if echo "$private_key_clean" | wg pubkey >/dev/null 2>&1; then
+
+        success "VALID PrivateKey!"
+
+    else
+
+        error "Private key IS NOT VALID!!!"
+
+    fi
+
+    if echo "$public_key_clean" | wg pubkey >/dev/null 2>&1; then
+
+        success "VALID PublicKey!"
+
+    else
+
+        warning "Public key IS NOT VALID!!!"
+
+    fi
+}
+
+
+#####################################################################
+# WG-AUTOCONF setup conf_name
+setup_wireguard() {
+
+    local conf_name="$1"
+    local conf_file="$WG_CONF_DIR/$conf_name.conf"
+
+    [ -f "$conf_file" ] || error "$conf_file is missing!!!"
+
+    log "Setting up wg from $conf_name.conf... "
+
+    # 1. EXTRACT VALUES (keys)
+    private_key_raw=$(get_conf_value "PrivateKey" "$conf_file")
+    public_key_raw=$(get_conf_value "PublicKey" "$conf_file")
+
+    address=$(get_conf_value "Address" "$conf_file")
+    endpoint=$(get_conf_value "Endpoint" "$conf_file")
+    allowed_ips_raw=$(get_conf_value "AllowedIPs" "$conf_file")
+
+    [ -z "$private_key_raw" ] && error "Missing PrivateKey"
+    [ -z "$public_key_raw" ] && error "Missing PublicKey"
+    [ -z "$address" ] && error "Missing Address"
+
+    # 2. HANDLE VALUE (_clean(), keys)
+    private_key=$(clean_wg_key "$private_key_raw")
+    public_key=$(clean_wg_key "$public_key_raw")
+
+    # 3. ENDPOINT FIX HABNLDER
+    endpoint_host=$(echo "$endpoint" | cut -d: -f1)
+    endpoint_port=$(echo "$endpoint" | cut -d: -f2)
+
+    # 3. SETTING UP wg INTERFACE
+    # To avoid firewall/dnsmasq problems, wg iface always is 'wg0'
+    iface_name="wg0"
+    peer_section="wg0_peer"
+
+    # 3.1 VERIFY if exists
+    if uci get "network.$iface_name" >/dev/null 2>&1; then
+
+        warning "$iface_name already exists!"
+
+        printf "Overwrite interface config? (y/N): "
+        read -r response
+
+        case "$response" in
+            y|Y|yes|YES|Yes)
+                remove_wireguard "$iface_name" silent
+                ;;
+            *)
+                log "WG-AUTOCONF setup CANCELLED!"
+                exit 0
+                ;;
+        esac
+    fi
+
+
+
+    # 3.2 WG CONF BACLUP
+    mkdir -p "$BACKUP_DIR"
+    backup_file="$BACKUP_DIR/network.$(date +%s).bak"
+    cp "$NETWORK_CONF" "$backup_file" 2>/dev/null && success "Config already backup-ed at: $backup_file"
+
+    # 4. WG IFACE CONF START
+
+    log "Setting up $iface_name..."
+
+    uci set network.$iface_name=interface
+    uci set network.$iface_name.proto=wireguard
+    uci set network.$iface_name.private_key="$private_key"
+    uci set network.$iface_name.addresses="$address"
+
+    # 4.1 DNS
+    # Temporalmente,y para evitar problemas, se tuneliza la DNS pero usando dns de cloudflare.... Algunos proveedores de wg NO funcionan con DNS directa propia
+    uci set network.$iface_name.dns="1.1.1.1 1.0.0.1"
+    log "wg0 DNS is: 1.1.1.1 1.0.0.1 (Harcoded values, TL;DR README.md#DNS)"
+
+
+    # 4.2 PEERs
+    uci set network.$peer_section=wireguard_$iface_name
+    uci set network.$peer_section.public_key="$public_key"
+
+    [ -n "$endpoint_host" ] && uci set network.$peer_section.endpoint_host="$endpoint_host"
+    [ -n "$endpoint_port" ] && uci set network.$peer_section.endpoint_port="$endpoint_port"
+
+
+    # 4.3   ALLOWED IPs vs NATIVE WAN
+    # Para evitar conflictos con la posible WAN original,
+    # se ajusta route_allowed_ips="0"
+    # Para acceder a iface wg0, ejemplos:
+    # ping -i wg0 8.8.8.8
+    #
+    # Para asignar las routes de wg0 a alguna iface concreta,
+    # se utilizan comandos wg-autoconf routes set/unset/show
+    uci set network.$peer_section.route_allowed_ips="0"
+    uci set network.$peer_section.persistent_keepalive="25"
+
+    # 4.4 ALLOWED_IPS Handler
+    if [ -n "$allowed_ips_raw" ]; then
+        process_allowed_ips "$allowed_ips_raw" | while read -r ip; do
+            [ -n "$ip" ] && uci add_list network.$peer_section.allowed_ips="$ip"
+        done
+    else
+        uci add_list network.$peer_section.allowed_ips="0.0.0.0/0"
+        uci add_list network.$peer_section.allowed_ips="::/0"
+    fi
+
+
+
+    # 5. UCI COMMIT NETWORK included
+    uci commit network
+
+
+    # 5. IPv6 BREAKER (dnsmasq->ipv6())
+    configure_dns_ipv6_filter
+
+    # 6. SETUP results
+    echo ""
+    success "Completed!"
+    echo ""
+    echo "**** WireGuard CONFIG ****"
+    echo "Interface:           $iface_name"
+    echo "Local IP:            $address"
+    echo "Endpoint:            ${endpoint_host:-N/A}:${endpoint_port:-N/A}"
+    echo "DNS:                 1.1.1.1 1.0.0.1 (Remember, Hardcoded values)"
+    echo "Route Allowed:       NO (Native WAN still works)"
+    echo "IPv6 DNS:            Filtered"
+    echo ""
+    echo "=== NOW ... ==="
+    echo "1. ENABLE WG:         wg-autoconf up $iface_name"
+    echo "2. VERIFY:            wg show $iface_name"
+    echo "3. TEST WG:           ping -I $iface_name 8.8.8.8"
+    echo "4. TEST DNS:          ping -I $iface_name google.com"
+}
+
+
+
+
+#####################################################################
+# WG-AUTOCONF setup IPv6 disabling (dnsmasq->ipv6())
+configure_dns_ipv6_filter() {
+
+    if uci get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
+
+        current_filter=$(uci get dhcp.@dnsmasq[0].filter_aaaa 2>/dev/null || echo "0")
+
+        if [ "$current_filter" != "1" ]; then
+
+            log "Setting up dnsmasq filtering-IPv6-AAAA records ..."
+
+            uci set dhcp.@dnsmasq[0].filter_aaaa='1'
+
+            # AUTOUCICOMMITs
+            uci commit dhcp
+
+            if /etc/init.d/dnsmasq restart >/dev/null 2>&1; then
+
+                success "DNS configured: Filtering IPv6"
+
+            else
+
+                warning "No se pudo reiniciar dnsmasq (puede estar bien)"
+
+            fi
+        fi
+    else
+
+        warning "dnsmasq NOT FOUND! Please acommply requirements!"
+
+    fi
+}
+
+
+#####################################################################
+# WG-AUTOCONF up iface
+activate_interface() {
+    local iface="$1"
+
+    # 1. VERIFY wg0 name
+    [ "$iface" = "wg0" ] || error "Iface name MUST be wg0"
+
+    # 2. VERIFY wg0 EXISTANCE
+    uci get "network.$iface" >/dev/null 2>&1 || error "$iface DOES NOT exist"
+
+    log "Enabling $iface..."
+
+    if ifup "$iface" >/dev/null 2>&1; then
+
+        success "$iface enabled!"
+        echo ""
+        echo "Test commands:"
+        echo "  wg show $iface"
+    else
+        error "Errors found enabilng $iface. Check logread | tail -20"
+    fi
+}
+
+
+
+#####################################################################
+# WG-AUTOCONF down iface
+deactivate_interface() {
+    local iface="$1"
+
+    # 1. VERIFY wg0 name
+    [ "$iface" = "wg0" ] || error "Iface name MUST be wg0"
+
+    # 2. VERIFY wg0 EXISTANCE
+    uci get "network.$iface" >/dev/null 2>&1 || error "$iface DOES NOT exist"
+
+    log "Removing $iface..."
+
+    ifdown "$iface" >/dev/null 2>&1 && success "$iface removed!" || error "$iface was NOT removed! Check logs!"
+}
+
+#####################################################################
+# WG-AUTOCONF down iface PART 2, REMOVE
+remove_wireguard() {
+
+    local iface="$1"
+    local silent="${2:-no}"
+
+    [ "$silent" != "silent" ] && log "Removing $iface..."
+
+    uci get "network.$iface" >/dev/null 2>&1 || {
+        [ "$silent" != "silent" ] && error "$iface DOES NOT exist!"
+        return 1
+    }
+
+    ifdown "$iface" 2>/dev/null
+
+    # BACKUP PREV TO REMOVE
+    mkdir -p "$BACKUP_DIR"
+    backup_file="$BACKUP_DIR/network.remove.$(date +%s).bak"
+    cp "$NETWORK_CONF" "$backup_file" 2>/dev/null
+
+    uci delete network.$iface
+    uci delete "network.${iface}_peer" 2>/dev/null
+    uci commit network
+
+
+
+    [ "$silent" != "silent" ] && success "$iface removed!"
+}
+
+
+#####################################################################
+# # WG-AUTOCONF status
+show_status() {
+
+    log "WireGuard status:"
+    echo ""
+
+    interfaces=$(uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | cut -d. -f2 | cut -d= -f1 | sort)
+
+    [ -z "$interfaces" ] && echo "No WG interfaces configured ..." && return
+
+    for iface in $interfaces; do
+        echo "$iface"
+
+        address=$(uci get "network.$iface.addresses" 2>/dev/null || echo "N/A")
+        echo "  IP: $address"
+
+        if ip link show "$iface" >/dev/null 2>&1; then
+            echo "  Status: UP"
+            wg show "$iface" 2>/dev/null | grep -E "(interface:|peer:|endpoint:|latest)" | head -4
+        else
+            echo "  Status: DOWN"
+        fi
+
+        echo ""
+    done
+}
+
+
+#####################################################################
+# WG-AUTOCONF cleanup
+cleanup_all() {
+
+    log "Cleaning up all WireGuard interfces ..."
+
+    interfaces=$(uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | cut -d. -f2 | cut -d= -f1 | sort)
+
+    [ -z "$interfaces" ] && success "No WG interfaces available :) !" && return 0
+
+    echo "Found WG interfaces:"
+    for iface in $interfaces; do
+        echo "  - $iface"
+    done
+
+    printf "Remove ALL interfaces? (/N): "
+    read -r response
+    case "$response" in
+        y|Y|yes|YES|Yes)
+            for iface in $interfaces; do
+
+                remove_wireguard "$iface" silent
+
+            done
+
+            success "All WG interfaces succesfully removed!"
+            ;;
+        *)
+            log "Cancelled!"
+            ;;
+    esac
+}
+
+
+#####################################################################
+# WG-AUTOCONF routes set/unset/show
+
+# WG-AUTOCONF routes SET
+configure_routes() {
+
+    local action="$1"
+    local lan_iface="$2"
+
+    [ -z "$lan_iface" ] && error "Please type interface name as expected (ej: lan1)"
+
+    case "$action" in
+        set)
+            set_lan_routes "$lan_iface"
+            ;;
+        unset)
+            unset_lan_routes "$lan_iface"
+            ;;
+        *)
+            error "Please, use set/unset options as expected: $action"
+            ;;
+    esac
+}
+
+
+#####################################################################
+# WG-AUTOCONF routes SET, PART 2
+set_lan_routes() {
+
+    local lan_iface="$1"
+
+    # 1. VERIFY EXCISTANCE
+    if ! uci get "network.$lan_iface" >/dev/null 2>&1; then
+
+        error "$lan_iface NOT FOUND at /etc/config/network"
+
+    fi
+
+    # 2. GET IP/DNSMASQ for iface
+    local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
+    local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
+
+    [ -z "$lan_ip" ] && error "Desired iface, $lan_iface IP not found!"
+
+    # 3. MASK/SUBNET -> Assuming /24
+    local subnet
+
+    if [ -n "$lan_netmask" ] && [ "$lan_netmask" = "255.255.255.0" ]; then
+
+        subnet="${lan_ip%.*}.0/24"
+
+    else
+
+        subnet="${lan_ip%.*}.0/24"
+        warning "$lan_iface /24 assumed. If SUBNET MASK IS DIFERENT, please, reconfigure it manually!!!"
+    fi
+
+    local table_name="${lan_iface}_vpn"
+
+
+    # 4.
+    log "Setting up routes for $lan_iface ($subnet) → wg0..."
+
+    # 4.1. TABLE NOT EXIST? -> create it
+
+    if ! grep -q "$table_name" /etc/iproute2/rt_tables 2>/dev/null; then
+
+        echo "150 $table_name" >> /etc/iproute2/rt_tables
+        success "Tabla creada: $table_name"
+
+    fi
+
+    # 4.2. CLEAN PREVIOUS TABLE CONFS
+    ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
+    ip route flush table "$table_name" 2>/dev/null
+
+
+    # 4.3 CREATING
+    ip rule add from "$subnet" lookup "$table_name"
+    ip rule add from "$subnet" to "$subnet" lookup main
+
+
+    # 4.4. LOCAL TO VPN
+    ip route add "$subnet" dev "$lan_iface" table "$table_name"
+
+
+    # 4.5 default Route wg0
+    if ip link show wg0 >/dev/null 2>&1; then
+
+        ip route add default dev wg0 table "$table_name"
+        success "Route conf d0ne!: $lan_iface through wg0"
+        echo "   ANY device from $subnet will use WireGuard"
+
+    else
+
+        warning "wg0 does NOT exist yet!"
+        echo "   $lan_iface WONT work unless wg0 is active!"
+        echo "   Fix: $0 up wg0 when ready!"
+    fi
+
+
+    # 4.6 RESUME CONFS
+    echo ""
+    echo "=== WG ROUTE CONFS ==="
+    ip rule show | grep -E "($table_name|$subnet)"
+    ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
+}
+
+
+#####################################################################
+# WG-AUTOCONF routes UNSET
+unset_lan_routes() {
+
+    local lan_iface="$1"
+    local table_name="${lan_iface}_vpn"
+
+    log "Removing $lan_iface routes ..."
+
+    # 1. GET SUBNET
+    local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
+    local subnet="${lan_ip%.*}.0/24"
+
+    # 2. CLEAN ROUTES
+    ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
+    ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
+    ip route flush table "$table_name" 2>/dev/null
+
+
+    success "$lan_iface routes succesfully removed!"
+}
+
+#####################################################################
+# WG-AUTOCONF routes SHOW
+show_routes() {
+
+    log "LAN -> WireGuard routes: "
+    echo ""
+
+    # 1. GET TABLES "_vpn"
+    if [ -f /etc/iproute2/rt_tables ]; then
+
+        grep "_vpn" /etc/iproute2/rt_tables 2>/dev/null | while read -r line; do
+
+            local table_id=$(echo "$line" | awk '{print $1}')
+            local table_name=$(echo "$line" | awk '{print $2}')
+            local lan_iface="${table_name%_vpn}"
+
+
+            # 2.VERIFY
+            if uci get "network.$lan_iface" >/dev/null 2>&1; then
+
+                echo "$lan_iface:"
+                echo "  $table_name (ID: $table_id)"
+
+                # 2.1 SHOW RULES
+                ip rule show | grep "lookup $table_name" | sed 's/^/  Rule: /'
+
+                # 2.2 SHOW ROUTES
+                ip route show table "$table_name" 2>/dev/null | while read -r route; do
+                    echo "  Route: $route"
+                done || echo "  (no routes found ...)"
+
+                echo ""
+            fi
+
+        done
+
+        # 3. IF NO TABLES
+        if ! grep -q "_vpn" /etc/iproute2/rt_tables 2>/dev/null; then
+
+            echo "No LAN -> WireGuard routes/tables found"
+
+        fi
+
+    else
+
+        echo "/etc/iproute2/rt_tables config NOT found"
+
+    fi
+}
+
+
+
+#####################################################################
+# MAIN CMD
+
+[ $# -eq 0 ] && show_usage
+
+case "$1" in
+    list)
+        list_configs
+        ;;
+    setup)
+        [ -n "$2" ] && setup_wireguard "$2" || show_usage
+        ;;
+    up)
+        [ -n "$2" ] && activate_interface "$2" || show_usage
+        ;;
+    down)
+        [ -n "$2" ] && deactivate_interface "$2" || show_usage
+        ;;
+    remove)
+        [ -n "$2" ] && remove_wireguard "$2" || show_usage
+        ;;
+    status)
+        show_status
+        ;;
+    test)
+        [ -n "$2" ] && test_config "$2" || show_usage
+        ;;
+    cleanup)
+        cleanup_all
+        ;;
+    routes)
+        case "$2" in
+            set)
+                [ -n "$3" ] && configure_routes "set" "$3" || show_usage
+                ;;
+            unset)
+                [ -n "$3" ] && configure_routes "unset" "$3" || show_usage
+                ;;
+            show)
+                show_routes
+                ;;
+            *)
+                show_usage
+                ;;
+        esac
+        ;;
+    *)
+        show_usage
+        ;;
+esac
