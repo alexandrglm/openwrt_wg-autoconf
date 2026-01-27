@@ -35,3 +35,26 @@ post_install() {
 	echo "[wg-autoconf] D0ne. 3njoy! "
 	echo ""
 }
+
+
+pre_deinstall() {
+
+	/etc/usr/wg-autoconfig cleanup
+	sleep 1
+	uci commit firewall
+	uci commit dhcp
+	uci commit network
+	sleep 1
+	/etc/init.d/wg-autoconfig_boot_cleanup enable stop
+	rm -rf /etc/init.d/wg-autoconfig_boot_cleanup enable
+
+}
+
+post_deinstall() {
+
+	echo ""
+	echo "[wg-autoconf] Succesfully uninstalled. Check your network/firewall/dhcp. Reboot if needed"
+	echo "[wg-autoconf] Thanks for using this tool! :D"
+	echo ""
+
+}
