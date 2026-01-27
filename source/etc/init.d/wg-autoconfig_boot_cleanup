@@ -1,23 +1,24 @@
 #!/bin/sh /etc/rc.common
-# Needed to ensure proper cleaning of any WireGuard interface at boot
 
-START=05
+START=99
 STOP=99
 
 start() {
-  
+
+    /usr/bin/wg-autoconf cleanup -y
+
     for iface in $(ip link show | grep -o "wg[0-9]*" | sort -u); do
         ip link delete "$iface" 2>/dev/null
     done
-    
+
     uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | \
         cut -d. -f2 | cut -d= -f1 | while read -r iface; do
         uci delete "network.$iface" 2>/dev/null
         uci delete "network.${iface}_peer" 2>/dev/null
     done
-    
+
     uci commit network 2>/dev/null
-    
+
 }
 
 stop() {
