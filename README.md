@@ -78,6 +78,33 @@ If you want **dedicated LAN ports routed through `wg0`**, you must **remove them
 
 The following example explains on how to dedicate a specific physical LAN port to WireGuard routing:
 
+### NETWORK
+```
+...
+config device
+        option name 'br-lan'
+        option type 'bridge'
+        list ports 'lan4'
+        list ports 'lan3'
+        list ports 'lan2'
+
+config interface 'lan'
+        option device 'br-lan'
+        option proto 'static'
+        option ipaddr '192.168.1.1'
+        option netmask '255.255.255.0'
+        option ip6assign '60'
+
+config interface 'lan1'
+        option device 'lan1'
+        option proto 'static'
+        option ipaddr '192.168.2.1'
+        option netmask '255.255.255.0'
+        option ip6assign '60'
+
+...
+```
+
 ### FIREWALL
 
 Assuming you want to dedicate your physical LAN port **lan1** (mapped from `lan1@eth0`) for WireGuard traffic only:
