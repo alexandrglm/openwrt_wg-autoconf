@@ -1,4 +1,5 @@
 #!/bin/sh /etc/rc.common
+# Needed to ensure proper cleaning of any WireGuard interface at boot
 
 START=05
 STOP=99
