@@ -23,7 +23,6 @@ build() {
 package() {
 	install -Dm755 "$builddir/usr/bin/wg-autoconf-test" "$pkgdir/usr/bin/wg-autoconf"
 	install -Dm755 "$builddir/etc/init.d/wg_boot_cleanup" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
-	install -Dm755 "$builddir/etc/init.d/wg_boot_LAN4" "$pkgdir/etc/init.d/wg_boot_LAN4"
 }
 
 post_install() {
