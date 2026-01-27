@@ -1,10 +1,17 @@
-#!/bin/sh
+#!/bin/ash
 #
 # 2026-01-27
-#
-# wg-autoconf v.0.1 for OpenWRT
-# PATH: /usr/bin/wg-autoconf
-#
+# Maintainer: Alexander Gomez <148530039+alexandrglm@users.noreply.github.com>
+# pkgname=wg-autoconf
+# pkgver=1.0.1
+# pkgrel=0
+# pkgdesc="WireGuard Auto-Configuration tool"
+# url="https://github.com/alexandrglm/openwrt_wg-autoconf"
+# arch="noarch"
+# license="MIT"
+# depends="wireguard-tools acs "
+# options="!check !builddeps"
+# source="wg-autoconf
 
 
 WG_CONF_DIR="/etc/wireguard"
@@ -39,7 +46,7 @@ clean_wg_key() {
     # 3. PROTONVPN specific (+)
     [ "${key:0:1}" = "+" ] && key="${key:1}"
 
-    # 4. Verify 44 chars
+    # 4. Verify 44 chars (WireGuard standard)
     local len=${#key}
     [ $len -eq 43 ] && key="${key}="
 
@@ -65,41 +72,110 @@ process_allowed_ips() {
     local ips="$1"
 
     # 1. CLEAN
-    ips=$(echo "$ips" | sed 's/^[ \t]*//;s/[ \t]+$//')
+    ips=$(echo "$ips" | sed 's/^[ \t]*//;s/[ \t]*$//')
 
-    # 2. IPv6, commas
-    echo "$ips" | awk 'BEGIN {RS=","} {
-        gsub(/^[ \t]+|[ \t]+$/, "", $0)
-        if ($0 != "") print $0
-    }'
+    # 2. IPv6, commas - improved handling
+    echo "$ips" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' | grep -v '^$'
 }
+
+#####################################################################
+# NETMASK TO CIDR converter
+netmask_to_cidr() {
+    local mask="$1"
+
+    case "$mask" in
+        255.255.255.0)   echo 24 ;;
+        255.255.255.128) echo 25 ;;
+        255.255.255.192) echo 26 ;;
+        255.255.255.224) echo 27 ;;
+        255.255.255.240) echo 28 ;;
+        255.255.255.248) echo 29 ;;
+        255.255.255.252) echo 30 ;;
+        255.255.0.0)     echo 16 ;;
+        255.0.0.0)       echo 8 ;;
+        *)               echo 24 ;; # default fallback
+    esac
+}
+
+#####################################################################
+# IP to network address converter
+ip_to_network() {
+    local ip="$1"
+    local cidr="$2"
+
+    case "$cidr" in
+        24)
+            echo "${ip%.*}.0"
+            ;;
+        25|26|27|28|29)
+
+            # ASH does NOT recognise ** for exponentiation
+            # and (( ... )) does NOT work for complex operations
+            # so ...
+            # pow_2() need to be used or something to "step = 256 / 2^(32-cidr)"
+
+            local octet=${ip##*.}
+            local bits=$((32 - cidr))
+
+            local step=1 i
+
+            i=0
+
+            while [ $i -lt $bits ]; do
+                step=$((step * 2))
+                i=$((i + 1))
+            done
+
+            step=$((256 / step))
+
+
+            local net=$(( (octet / step) * step ))
+
+            echo "${ip%.*}.$net"
+            ;;
+        16)
+            echo "${ip%.*.*}.0"
+            ;;
+        8)
+            echo "${ip%.*.*.*}.0"
+            ;;
+        *)
+            echo "${ip%.*}.0"
+            ;;
+    esac
+}
+
 
 #####################################################################
 # WG-AUTOCONF usage, help
 show_usage() {
 
-    echo "WireGuard Auto-Config for OpenWrt"
-    echo "Usage: $0 <cmd> [args]"
+    echo "== WireGuard Auto-Config for OpenWrt =="
+    echo "Usage: wg-autoconf <cmd> [args]"
     echo ""
     echo "Available commands:"
+    echo " "
     echo "  list                     - List all .conf files, default PATH=/etc/wireguard/*.conf"
+    echo "  test <conf_name>         - Test .conf file previous to set up"
     echo "  setup <conf_name>        - Easy setup from desired .conf"
+    echo " "
+    echo "  status                   - Show wg status"  
     echo "  up <iface>               - Enable wg interface"
     echo "  down <iface>             - Disable wg interace"
     echo "  remove <iface>           - Delete wg interface"
-    echo "  status                   - Show wg status"
-    echo "  test <conf_name>         - Test .conf file previous to set up"
-    echo "  cleanup                  - Easy wg cleaning"
+    echo " "
+    echo "  routes show              - Show all configured routes"
     echo "  routes set <lan_iface>   - Set routes from desired LAN -> WireGuard"
     echo "  routes unset <lan_iface> - Unset routes from desired LAN -> WireGuard"
-    echo "  routes show              - Show all configured routes"
+    echo " "
+    echo "  cleanup                  - Easy wg cleaning"
     echo ""
     echo "Examples:"
-    echo "  $0 list"
-    echo "  $0 setup wg-conf"
-    echo "  $0 up wg0"
-    echo "  $0 routes set lan1"
-    echo "  $0 routes unset lan1"
+    echo "  wg-autoconf list"
+    echo "  wg-autoconf setup <wg-conf_file>"
+    echo "  wg-autoconf up wg0"
+    echo "  wg-autoconf routes set lan1"
+    echo "  wg-autoconf routes unset lan1"
     exit 1
 }
 
@@ -205,7 +281,7 @@ setup_wireguard() {
     private_key=$(clean_wg_key "$private_key_raw")
     public_key=$(clean_wg_key "$public_key_raw")
 
-    # 3. ENDPOINT FIX HABNLDER
+    # 3. ENDPOINT FIX HANDLER
     endpoint_host=$(echo "$endpoint" | cut -d: -f1)
     endpoint_port=$(echo "$endpoint" | cut -d: -f2)
 
@@ -235,7 +311,7 @@ setup_wireguard() {
 
 
 
-    # 3.2 WG CONF BACLUP
+    # 3.2 WG CONF BACKUP
     mkdir -p "$BACKUP_DIR"
     backup_file="$BACKUP_DIR/network.$(date +%s).bak"
     cp "$NETWORK_CONF" "$backup_file" 2>/dev/null && success "Config already backup-ed at: $backup_file"
@@ -329,7 +405,7 @@ configure_dns_ipv6_filter() {
 
             uci set dhcp.@dnsmasq[0].filter_aaaa='1'
 
-            # AUTOUCICOMMITs
+            # AUTOUCICOMMITS
             uci commit dhcp
 
             if /etc/init.d/dnsmasq restart >/dev/null 2>&1; then
@@ -467,7 +543,7 @@ cleanup_all() {
         echo "  - $iface"
     done
 
-    printf "Remove ALL interfaces? (/N): "
+    printf "Remove ALL interfaces? (y/N): "
     read -r response
     case "$response" in
         y|Y|yes|YES|Yes)
@@ -520,7 +596,7 @@ set_lan_routes() {
     # 1. VERIFY EXCISTANCE
     if ! uci get "network.$lan_iface" >/dev/null 2>&1; then
 
-        error "$lan_iface NOT FOUND at /etc/config/network"
+        error "$lan_iface interface NOT FOUND at /etc/config/network"
 
     fi
 
@@ -530,18 +606,18 @@ set_lan_routes() {
 
     [ -z "$lan_ip" ] && error "Desired iface, $lan_iface IP not found!"
 
-    # 3. MASK/SUBNET -> Assuming /24
+    # 3. MASK/SUBNET -> Convert netmask to CIDR
+    local cidr
     local subnet
 
-    if [ -n "$lan_netmask" ] && [ "$lan_netmask" = "255.255.255.0" ]; then
-
-        subnet="${lan_ip%.*}.0/24"
-
+    if [ -n "$lan_netmask" ]; then
+        cidr=$(netmask_to_cidr "$lan_netmask")
     else
-
-        subnet="${lan_ip%.*}.0/24"
-        warning "$lan_iface /24 assumed. If SUBNET MASK IS DIFERENT, please, reconfigure it manually!!!"
+        cidr=24
+        warning "$lan_iface netmask not found, assuming /24"
     fi
+
+    subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
 
     local table_name="${lan_iface}_vpn"
 
@@ -576,7 +652,7 @@ set_lan_routes() {
     if ip link show wg0 >/dev/null 2>&1; then
 
         ip route add default dev wg0 table "$table_name"
-        success "Route conf d0ne!: $lan_iface through wg0"
+        success "Route conf done!: $lan_iface through wg0"
         echo "   ANY device from $subnet will use WireGuard"
 
     else
@@ -590,7 +666,7 @@ set_lan_routes() {
     # 4.6 RESUME CONFS
     echo ""
     echo "=== WG ROUTE CONFS ==="
-    ip rule show | grep -E "($table_name|$subnet)"
+    ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
     ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
 }
 
@@ -604,9 +680,18 @@ unset_lan_routes() {
 
     log "Removing $lan_iface routes ..."
 
-    # 1. GET SUBNET
+    # 1. GET SUBNET with proper CIDR
     local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
-    local subnet="${lan_ip%.*}.0/24"
+    local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
+    local cidr
+
+    if [ -n "$lan_netmask" ]; then
+        cidr=$(netmask_to_cidr "$lan_netmask")
+    else
+        cidr=24
+    fi
+
+    local subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
 
     # 2. CLEAN ROUTES
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
