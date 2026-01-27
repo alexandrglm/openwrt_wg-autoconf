@@ -31,6 +31,10 @@ post_install() {
 	/etc/init.d/wg-autoconfig_boot_cleanup enable
 	sleep 1
 	echo ""
+	uci commit dhcp
+	uci commit firewall
+	uci commit network
+	sleep 1
 	echo "[wg-autoconf] Check README, check network, firewall, dhcp, init.d cleanups, ..."
 	echo "[wg-autoconf] D0ne. 3njoy! "
 	echo ""
@@ -40,21 +44,22 @@ post_install() {
 pre_deinstall() {
 
 	/etc/usr/wg-autoconfig cleanup
+	/etc/init.d/wg-autoconfig_boot_cleanup stop
+	/etc/init.d/wg-autoconfig_boot_cleanup disable
+	rm -rf /etc/init.d/wg-autoconfig_boot_cleanup
 	sleep 1
 	uci commit firewall
 	uci commit dhcp
 	uci commit network
 	sleep 1
-	/etc/init.d/wg-autoconfig_boot_cleanup enable stop
-	rm -rf /etc/init.d/wg-autoconfig_boot_cleanup enable
-
+	rm -rf /tmp/wg-backup
 }
 
 post_deinstall() {
 
 	echo ""
 	echo "[wg-autoconf] Succesfully uninstalled. Check your network/firewall/dhcp. Reboot if needed"
-	echo "[wg-autoconf] Thanks for using this tool! :D"
+	echo "(: Thanks for using this tool!"
 	echo ""
 
 }
