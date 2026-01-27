@@ -1,6 +1,6 @@
 # Maintainer: Alexander Gomez <148530039+alexandrglm@users.noreply.github.com>
 pkgname=wg-autoconf
-pkgver=1.0.1
+pkgver=1.0.0
 pkgrel=2
 pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
 url="https://github.com/alexandrglm/openwrt_wg-autoconf"
@@ -21,13 +21,15 @@ build() {
 }
 
 package() {
-	install -Dm755 "$builddir/usr/bin/wg-autoconf-test" "$pkgdir/usr/bin/wg-autoconf"
-	install -Dm755 "$builddir/etc/init.d/wg_boot_cleanup" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
+	install -Dm755 "$builddir/usr/bin/wg-autoconf" "$pkgdir/usr/bin/wg-autoconf"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconfig_boot_cleanup" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
+	install -Dm755 "$builddir/etc/wireguard/.WG_CONF_FILES_GOES_HERE" "$pkgdir/etc/wireguard/.WG_CONF_FILES_GOES_HERE"
 }
 
 post_install() {
-	echo "[wg-autoconf] Enabling  /etc/init.d/wg-autoconfig_boot_cleanup ..."
+	echo "[wg-autoconf] Enabling  /etc/init.d/wg-autoconfig_boot_cleanup and LAN4 ..."
 	chmod +x /etc/init.d/wg-autoconfig_boot_cleanup
+	sleep 1
 	/etc/init.d/wg-autoconfig_boot_cleanup enable
 	sleep 1
 	echo ""
@@ -63,3 +65,4 @@ post_deinstall() {
 	echo ""
 
 }
+
