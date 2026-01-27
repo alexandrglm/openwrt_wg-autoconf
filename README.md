@@ -215,8 +215,12 @@ These configurations are **indicative**, so always check how your network is cur
 Since some providers do not properly assign DNS servers (e.g., ProtonVPN free-tier), the current tunnel configuration applies Cloudflare IPv4 DNS (`1.1.1.1`) as a **hardcoded default by the tool**.
 
 If you want to change it to your own DNS values, or to the provider’s DNS, adjust it via:
+```
+uci set ...
+uci commit network
+```
 
-DNS queries are always tunneled through WireGuard; the native WAN path is **never** used for DNS resolution (prevents DNS leaks).
+**DNS queries are always tunneled through WireGuard**; the native WAN path is **never** used for DNS resolution (prevents DNS leaks).
 
 ---
 
