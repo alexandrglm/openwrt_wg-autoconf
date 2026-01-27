@@ -159,7 +159,7 @@ show_usage() {
     echo "  test <conf_name>         - Test .conf file previous to set up"
     echo "  setup <conf_name>        - Easy setup from desired .conf"
     echo " "
-    echo "  status                   - Show wg status"  
+    echo "  status                   - Show wg status"
     echo "  up <iface>               - Enable wg interface"
     echo "  down <iface>             - Disable wg interace"
     echo "  remove <iface>           - Delete wg interface"
@@ -531,29 +531,56 @@ show_status() {
 #####################################################################
 # WG-AUTOCONF cleanup
 cleanup_all() {
+    local force_yes=0
 
-    log "Cleaning up all WireGuard interfces ..."
+
+
+   ## CASE args:y -> CHECK
+    if [ "$1" = "-y" ] || [ "$1" = "--yes" ]; then
+        force_yes=1
+    fi
+
+
+
+    log "Cleaning up all WireGuard interfaces ..."
 
     interfaces=$(uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | cut -d. -f2 | cut -d= -f1 | sort)
 
     [ -z "$interfaces" ] && success "No WG interfaces available :) !" && return 0
 
     echo "Found WG interfaces:"
+
     for iface in $interfaces; do
         echo "  - $iface"
     done
 
+
+
+    ## CASE args:y -> IF
+    if [ $force_yes -eq 1 ]; then
+
+        log "Forced removal (-y flag detected)"
+
+        for iface in $interfaces; do
+            remove_wireguard "$iface" silent
+        done
+
+        success "All WG interfaces successfully removed!"
+
+        return 0
+    fi
+
+
+    ## CASE no args
     printf "Remove ALL interfaces? (y/N): "
     read -r response
+
     case "$response" in
         y|Y|yes|YES|Yes)
             for iface in $interfaces; do
-
                 remove_wireguard "$iface" silent
-
             done
-
-            success "All WG interfaces succesfully removed!"
+            success "All WG interfaces successfully removed!"
             ;;
         *)
             log "Cancelled!"
@@ -753,7 +780,6 @@ show_routes() {
 }
 
 
-
 #####################################################################
 # MAIN CMD
 
@@ -782,7 +808,7 @@ case "$1" in
         [ -n "$2" ] && test_config "$2" || show_usage
         ;;
     cleanup)
-        cleanup_all
+        cleanup_all "$2"
         ;;
     routes)
         case "$2" in
