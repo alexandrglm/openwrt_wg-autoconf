@@ -22,6 +22,8 @@ build() {
 
 package() {
 	install -Dm755 "$builddir/usr/bin/wg-autoconf.sh" "$pkgdir/usr/bin/wg-autoconf"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/debug.sh" "$pkgdir/usr/libexec/wg-autoconf/debug.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/log/wg-autoconf.log" "$pkgdir/usr/libexec/wg-autoconf/wg-autoconf.log"
 	install -Dm755 "$builddir/etc/init.d/wg-autoconfig_boot_cleanup" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
 	install -Dm755 "$builddir/etc/wireguard/.WG_CONF_FILES_GOES_HERE" "$pkgdir/etc/wireguard/.WG_CONF_FILES_GOES_HERE"
 }
