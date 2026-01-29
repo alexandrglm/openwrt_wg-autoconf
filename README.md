@@ -33,7 +33,7 @@ abuild -r
 apk add ./packages/*/wg-autoconf-*.apk
 ```
 
-**Use [https://github.com/alexandrglm/easy_apk_abuild/blob/main/easy_abuild.sh](this script), included, for easy builds (interactive bash management).**
+**You may prefer to use [this script](https://github.com/alexandrglm/easy_apk_abuild/blob/main/easy_abuild.sh), included, for easy builds (interactive CLI).**
 
 ---
 
