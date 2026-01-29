@@ -19,16 +19,22 @@
 # license="MIT"
 # depends="wireguard-tools ip-tiny dnsmasq"
 # options="!check !builddeps"
-# source="wg-autoconf
+# source="wg-autoconf ip dnsmasq"
 # ###########################################################################################
 
 
 
 #####################################################################
-# IMPORTS
-. /usr/libexec/wg-autoconf/debug.sh
-#####################################################################
-# GLOBALS
+#
+#  ██████╗ ██╗      ██████╗ ██████╗  █████╗ ██╗     ███████╗
+# ██╔════╝ ██║     ██╔═══██╗██╔══██╗██╔══██╗██║     ██╔════╝
+# ██║  ███╗██║     ██║   ██║██████╔╝███████║██║     ███████╗
+# ██║   ██║██║     ██║   ██║██╔══██╗██╔══██║██║     ╚════██║
+# ╚██████╔╝███████╗╚██████╔╝██████╔╝██║  ██║███████╗███████║
+#  ╚═════╝ ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝
+######################################################################
+
+
 VERSION="v1.0.0r3"
 
 WG_CONF_DIR="/etc/wireguard"
@@ -40,8 +46,17 @@ LOG_DIR="/etc/libexec/wg-autoconf/logs"
 BACKUP_PATHS="$NETWORK_CONF $DHCP_CONF $FIREWALL_CONF"
 
 #####################################################################
-# ASH COLOUR TERM
-RED='\033[0;31m'
+#
+# ██╗   ██╗████████╗██╗██╗     ███████╗
+# ██║   ██║╚══██╔══╝██║██║     ██╔════╝
+# ██║   ██║   ██║   ██║██║     ███████╗
+# ██║   ██║   ██║   ██║██║     ╚════██║
+# ╚██████╔╝   ██║   ██║███████╗███████║
+#  ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+#
+#####################################################################
+
+RED='\033[1;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -52,27 +67,28 @@ success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 
 
-#####################################################################
-# SHAREDFUNCS
-ui_lines() {
 
-    lenght="$1"
+ui_lines() {
+    length="$1"
     shift
 
     if [ -z "$1" ]; then
-
-        printf '%*s\n' "$lenght" '' | tr ' ' '='
-
-    else
-
-        title="[ $* ]"
-        base="==$title"
-        padding=$((lenght - ${#base}))
-
-        printf '%s' "$base"
-        [ "$padding" -gt 0 ] && printf '%*s' "$padding" '' | tr ' ' '='
-        printf '\n'
+        printf '%*s\n' "$length" '' | tr ' ' '='
+        return
     fi
+
+    coloured_title="$*"
+
+    clean_length=$(printf '%b' "$coloured_title" | sed 's/\x1b\[[0-9;]*m//g' | awk '{print length($0)}')
+
+    base_length=$((clean_length + 5))
+    padding=$((length - base_length))
+
+    printf '==[ '
+    printf '%b' "$coloured_title"
+    printf ' ]'
+    [ "$padding" -gt 0 ] && printf '%*s' "$padding" '' | tr ' ' '='
+    printf '\n'
 }
 
 #####################################################################
@@ -175,7 +191,6 @@ address_exists() {
 
     return 1
 }
-
 #####################################################################
 # WG KEY HANDLER -> CLEANING
 clean_wg_key() {
@@ -191,8 +206,6 @@ clean_wg_key() {
 
     echo "$key"
 }
-
-
 #####################################################################
 # WG CONF HANDLER -> Extracting keys
 get_conf_value() {
@@ -285,7 +298,7 @@ ip_to_network() {
 #####################################################################
 show_usage() {
     echo ""
-    ui_lines 80 "WireGuard Auto-Config for OpenWrt $VERSION"
+    ui_lines 80 "${GREEN}WireGuard Auto-Config${NC} for OpenWrt ${RED}$VERSION${NC}"
     echo ""
 
     # HEADER - Azul para el comando principal
@@ -763,19 +776,19 @@ setup_wireguard() {
     echo ""
     success "D0ne!"
     echo ""
-    ui_lines 80 "WireGuard CONFIG"
-    echo "Interface:           $iface_name"
-    echo "Local IP:            $address"
-    echo "Endpoint:            ${endpoint_host:-N/A}:${endpoint_port:-N/A}"
-    echo "DNS:                 1.1.1.1 1.0.0.1"
-    ui_lines 50 "FINISH SETUP"
-    echo "1. ENABLE WG:         wg-autoconf up $iface_name"
-    echo "2. VERIFY:            wg show $iface_name"
-    echo "3. TEST WG:           ping -I $iface_name 8.8.8.8"
-    echo "4. ROUTE LANs         wg-autoconf routes set $iface_name <lan_iface>"
+    ui_lines 80 "${GREEN}WireGuard CONFIG${NC}"
+    echo -e "${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
+    echo -e "${BLUE}Local IP:${NC}            ${YELLOW}$address${NC}"
+    echo -e "${BLUE}Endpoint:${NC}            ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
+    echo -e "${BLUE}DNS:${NC}                 ${YELLOW}1.1.1.1 1.0.0.1${NC}"
+    ui_lines 50 "${GREEN}FINISH SETUP${NC}"
+    echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
+    echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
+    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
+    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE LANs:${NC}        ${YELLOW}wg-autoconf routes set $iface_name <lan_iface>${NC}"
     echo ""
     ui_lines 80
-}
+    }
 
 #####################################################################
 # WG-AUTOCONF SETUP --advanced (MANUAL CONFIG)
@@ -1195,7 +1208,7 @@ save_wireguard_conf() {
     fi
 
     cat > "$conf_file" << EOF
-# $conf_file
+# $conf_file (Generated by wg-autoconf)
 [Interface]
 PrivateKey = $private_key
 Address = $address
@@ -1563,7 +1576,7 @@ backup_config_file() {
 
     cp "$file" "$backup_file" 2>/dev/null || error "Failed to backup $file"
 
-    success "Backed up $file → $backup_file"
+    success "Backed up $file -> $backup_file"
 }
 #####################################################################
 # TAG HANDLER -> Show backup files
@@ -2354,34 +2367,50 @@ show_routes() {
 #   - ip_to_network(): Calculates network address from IP and CIDR
 #
 #####################################################################
+#####################################################################
+# WG-AUTOCONF routes set/unset/show
+
+configure_routes() {
+
+    local action="$1"
+    local wg_iface="$2"
+    local lan_iface="$3"
+
+    case "$action" in
+        set)
+            [ -z "$wg_iface" ] || [ -z "$lan_iface" ] && error "Usage: wg-autoconf routes set <wg_iface> <lan_iface>"
+            set_lan_routes "$wg_iface" "$lan_iface"
+            ;;
+        unset)
+            [ -z "$wg_iface" ] || [ -z "$lan_iface" ] && error "Usage: wg-autoconf routes unset <wg_iface> <lan_iface>"
+            unset_lan_routes "$wg_iface" "$lan_iface"
+            ;;
+        *)
+            error "Usage: wg-autoconf routes set|unset|show [wg_iface]"
+            ;;
+    esac
+}
 set_lan_routes() {
     local wg_iface="$1"
     local lan_iface="$2"
 
-    # -------------------------------------------------------------------
-    # 1. VALIDATE / COLLISIONS
-    # -------------------------------------------------------------------
-    # VERIFY PREVIOUS WG IFACES
+    # 1. VERIFY WG IFACE EXISTS
     if ! iface_exists "$wg_iface"; then
         error "$wg_iface interface NOT FOUND at /etc/config/network"
     fi
 
-    # VERIFY PREVIOUS LANs
+    # 2. VERIFY LAN IFACE EXISTS
     if ! iface_exists "$lan_iface"; then
         error "$lan_iface interface NOT FOUND at /etc/config/network"
     fi
 
-    # -------------------------------------------------------------------
-    # 2. GET PREVIOUS LAN CONFIG
-    # -------------------------------------------------------------------
+    # 3. GET IP/NETMASK for LAN iface
     local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
     local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
 
     [ -z "$lan_ip" ] && error "Desired iface, $lan_iface IP not found!"
 
-    # -------------------------------------------------------------------
-    # 3. IP/NMETMAKS 2 CIDR
-    # -------------------------------------------------------------------
+    # 4. MASK/SUBNET -> CIDR
     local cidr
     local subnet
 
@@ -2394,79 +2423,57 @@ set_lan_routes() {
 
     subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
 
-    # CREATE
     local table_name="${lan_iface}_vpn_${wg_iface}"
 
     log "Setting up routes for $lan_iface ($subnet) -> $wg_iface..."
 
-    # -------------------------------------------------------------------
-    # 4. CREATE ROUTING TABLE IF IT DOESN'T EXIST
-    # -------------------------------------------------------------------
-    # CHECK PREVIOUS TABLES
+    # 5.1. TABLE NOT EXIST? -> create it
     if ! grep -q "$table_name" /etc/iproute2/rt_tables 2>/dev/null; then
-
-        # TODO: IDX TO TABLENAME
         echo "150 $table_name" >> /etc/iproute2/rt_tables
-        success "Table:: $table_name"
-
+        success "Tabla creada: $table_name"
     fi
 
-    # -------------------------------------------------------------------
-    # 5. CONFIGURE ROUTING RULES AND ROUTES
-    # -------------------------------------------------------------------
-
-    # 5.1. RULE DEL&FLUSH
+    # 5.2. CLEAN PREVIOUS TABLE CONFS
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip route flush table "$table_name" 2>/dev/null
 
-    # 5.2. ADD POLICY ROUTING RULES FROM LAN TO
+    # 5.3 CREATING
     ip rule add from "$subnet" lookup "$table_name"
     ip rule add from "$subnet" to "$subnet" lookup main
 
-    # 5.3. ADD LOCAL SUBNET ROUTE
+    # 5.4. LOCAL TO VPN
     ip route add "$subnet" dev "$lan_iface" table "$table_name"
 
-    # 5.4. ADD DEFAULT ROUTE THROUGH WIREGUARD IFACE
+    # 5.5 default Route to WireGuard interface
     if ip link show "$wg_iface" >/dev/null 2>&1; then
-
-        # ROUTE ADD WG
         ip route add default dev "$wg_iface" table "$table_name"
         success "Route conf done!: $lan_iface through $wg_iface"
         echo "   ANY device from $subnet will use WireGuard ($wg_iface)"
-
     else
         warning "$wg_iface does NOT exist yet!"
         echo "   $lan_iface WONT work unless $wg_iface is active!"
         echo "   To activate: wg-autoconf up $wg_iface"
-
     fi
 
-    # -------------------------------------------------------------------
-    # 6. CONFIGURE FIREWALL FORWARDING RULES
-    # -------------------------------------------------------------------
+    # 5.6 ADD FIREWALL FORWARDING RULES
     log "Adding firewall forwarding rules..."
 
-    # FIND FIREWALL TAG ID
+    # Find firewall tag ID for wg_iface
     local fw_line=$(grep -n "option name '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
 
     if [ -n "$fw_line" ]; then
-
-    # EXTRACT ITS OWN FIREWALL TAG ID
         local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
 
         if [ -n "$fw_tag_id" ] && grep -q "# wg-autoconf firewall end id $fw_tag_id" "$FIREWALL_CONF"; then
 
-            # CHECK MATCH
-            #  TEST
-            # if ! grep -q "option src '$lan_iface'" "$FIREWALL_CONF" 2>/dev/null || ! grep -q "option dest '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null; then
+            # Check if forwarding rules already exist
             if ! grep -q "option src '$lan_iface'" "$FIREWALL_CONF" 2>/dev/null | grep -q "option dest '$wg_iface'" 2>/dev/null; then
 
-            # THEN, ON LAST NUMBER
+                # Insert forwarding rules BEFORE the firewall end tag
                 local fw_end_line=$(grep -n "# wg-autoconf firewall end id $fw_tag_id" "$FIREWALL_CONF" | cut -d: -f1)
 
-            # INSERT BIDI FORWARD TAGS
                 sed -i "${fw_end_line}i\\
-
+\\
 config forwarding\\
     option src '$lan_iface'\\
     option dest '$wg_iface'\\
@@ -2478,7 +2485,7 @@ config forwarding\\
 
                 success "Firewall forwarding rules added"
             else
-                warning "Forwarding rules already exist for $lan_iface <-> $wg_iface"
+                warning "Forwarding rules already exist for $lan_iface ↔ $wg_iface"
             fi
         else
             warning "Firewall tag not found for $wg_iface"
@@ -2487,18 +2494,15 @@ config forwarding\\
         warning "Could not find firewall configuration for $wg_iface"
     fi
 
-
-    # -------------------------------------------------------------------
-    # 7. COMMIT FIREWALL AND SRESULTS
-    # -------------------------------------------------------------------
+    # UCI COMMIT
     uci commit firewall 2>/dev/null
-    /etc/init.d/firewall reload 2> /dev/null
+    /etc/init.d/firewall reload 2>/dev/null
 
+    # 5.7 RESUME CONFS
     echo ""
-    ui_lines 50 "WireGuard Routes"
+    echo "=== WG ROUTE CONFS ==="
     ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
     ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
-    ui_lines 50
 }
 
 #####################################################################
@@ -2526,60 +2530,67 @@ config forwarding\\
 #
 #####################################################################
 unset_lan_routes() {
-
     local wg_iface="$1"
     local lan_iface="$2"
-
     local table_name="${lan_iface}_vpn_${wg_iface}"
 
     log "Removing routes for $lan_iface (via $wg_iface)..."
 
-    # -------------------------------------------------------------------
-    # 1. CALCULATE LAN SUBNET WITH PROPER CIDR
-    # -------------------------------------------------------------------
-    # GET LAN CONFIG
-    local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
-    local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
-    local cidr
-
-    if [ -n "$lan_netmask" ]; then
-
-        cidr=$(netmask_to_cidr "$lan_netmask")
-
-    else
-        # FAILSAFING /24
-        cidr=24
-
-    fi
-
-    local subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
-
-    # -------------------------------------------------------------------
-    # 2. CLEAN ROUTING RULES AND ROUTES
-    # -------------------------------------------------------------------
-    # DEL RULES
+    # 1. CLEAN ROUTING RULES AND ROUTES
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
-
-    # FLUSH
     ip route flush table "$table_name" 2>/dev/null
 
-    # -------------------------------------------------------------------
-    # 3. REMOVE FIREWALL FORWARDING RULES
-    # -------------------------------------------------------------------
+    # 2. REMOVE FIREWALL FORWARDING RULES (BETTER METHOD)
     log "Removing firewall forwarding rules..."
 
-    sed -i "/config forwarding/,/option dest '$wg_iface'/{/option src '$lan_iface'/,/option dest '$wg_iface'/d;}" "$FIREWALL_CONF"
+    # Find firewall tag ID for wg_iface
+    local fw_line=$(grep -n "option name '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
 
-    sed -i "/config forwarding/,/option dest '$lan_iface'/{/option src '$wg_iface'/,/option dest '$lan_iface'/d;}" "$FIREWALL_CONF"
+    if [ -n "$fw_line" ]; then
+        local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
 
-    sed -i '/^[[:space:]]*$/N;/^\n$/!P;D' "$FIREWALL_CONF"
 
-    # -------------------------------------------------------------------
-    # 4. COMMIT FIREWALL CHANGES
-    # -------------------------------------------------------------------
-    uci commit firewall 2> /dev/null
-    /etc/init.d/firewall reload 2> /dev/null
+        #
+        if [ -n "$fw_tag_id" ]; then
+            # Remove ONLY the forwarding blocks for this specific pair
+            awk -v tag_id="$fw_tag_id" -v lan="$lan_iface" -v wg="$wg_iface" '
+                /# wg-autoconf firewall start id/ && $NF == tag_id { in_tag=1; print; next }
+                /# wg-autoconf firewall end id/ && in_tag { in_tag=0; print; next }
+
+                in_tag && /^config forwarding/ {
+                    getline; src = $0
+                    getline; dest = $0
+
+                    # Check if this is one of our rules to delete
+                    # Pattern: option src 'lan4' / option dest 'wg_us89'
+                    if ((src ~ "option src.*" lan && dest ~ "option dest.*" wg) ||
+                        (src ~ "option src.*" wg && dest ~ "option dest.*" lan)) {
+                        # Skip this block (delete it) - do nothing
+                        next
+                    } else {
+                        # Keep it
+                        print "config forwarding"
+                        print src
+                        print dest
+                    }
+                    next
+                }
+
+                # Skip completely blank lines unless in tag
+                /^[[:space:]]*$/ && !in_tag { next }
+
+                { print }
+            ' "$FIREWALL_CONF" | sed '/^[[:space:]]*$/N;/^\n$/!P;D' > "$FIREWALL_CONF.tmp"
+
+            mv "$FIREWALL_CONF.tmp" "$FIREWALL_CONF"
+            success "Firewall rules removed"
+        fi
+    fi
+
+    # 3. COMMIT
+    uci commit firewall 2>/dev/null
+    /etc/init.d/firewall reload 2>/dev/null
 
     success "$lan_iface routes (via $wg_iface) successfully removed!"
 }
@@ -2594,6 +2605,9 @@ unset_lan_routes() {
 ###########################################################
 
 [ $# -eq 0 ] && show_usage
+
+advanced_mode=0
+conf_name=""
 
 case "$1" in
     list)
