@@ -21,28 +21,21 @@ build() {
 }
 
 package() {
-	install -Dm755 "$builddir/usr/bin/wg-autoconf.source" "$pkgdir/usr/bin/wg-autoconf"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/debug.source" "$pkgdir/usr/libexec/wg-autoconf/debug.sh"
-	install -Dm755 "$builddir/etc/init.d/wg-autoconfig_boot_cleanup.source" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
+	install -Dm755 "$builddir/usr/bin/wg-autoconf.clean" "$pkgdir/usr/bin/wg-autoconf"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconfig_boot_cleanup.clean" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
 	install -Dm755 "$builddir/etc/wireguard/.WG_CONF_FILES_GOES_HERE" "$pkgdir/etc/wireguard/.WG_CONF_FILES_GOES_HERE"
 }
 
 post_install() {
 
-	# echo "[wg-autoconf] Enabling  /etc/init.d/wg-autoconfig_boot_cleanup and LAN4 ..." > /dev/kmesg
 	chmod +x /etc/init.d/wg-autoconfig_boot_cleanup
 	sleep 1
 	/etc/init.d/wg-autoconfig_boot_cleanup enable
 	/etc/init.d/wg-autoconfig_boot_cleanup start
 	sleep 1
-	echo ""
 	uci commit dhcp
 	uci commit firewall
 	uci commit network
-	sleep 1
-	# echo "[wg-autoconf] Check README, check network, firewall, dhcp, init.d cleanups, ..." > /dev/kmesg
-	# echo "[wg-autoconf] D0ne. 3njoy! " > /dev/kmesg
-
 }
 
 
@@ -55,8 +48,6 @@ pre_deinstall() {
 		sleep 3
 
 	else
-
-		# echo "[DEBUG wg-autoconf] PRE_DEINSTALL() NUKE-ALL start DIDNT WORK!!!!" > /dev/kmesg
 		# 2. or EMERGENCY MODE
 		if [ -f "/etc/config/network.BACKUP_PRE_WIREGUARD" ]; then
 			cp /etc/config/network.BACKUP_PRE_WIREGUARD /etc/config/network
@@ -88,12 +79,7 @@ pre_deinstall() {
 
 }
 post_deinstall() {
-
-	# echo " " > /dev/kmesg
 	echo "[wg-autoconf] Succesfully uninstalled. Check your network/firewall/dhcp. Reboot if needed." > /dev/kmesg
 	echo "(: Thanks for using this tool!" > /dev/kmesg
-	# echo " " > /dev/kmesg
 }
-sha512sums="
-e04631de2abd18c845d329c586d367328b774d714be7418f2d5f070d39fd944f59f4827f87e2cd5e88cdc67907dbfe9a849b3ba42e3e7d2b08599bdedf71c265  source.tar.gz
-"
+
