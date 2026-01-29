@@ -53,7 +53,7 @@ warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 
 
 #####################################################################
-# PROPERFUNCS
+# SHAREDFUNCS
 ui_lines() {
 
     lenght="$1"
@@ -75,6 +75,205 @@ ui_lines() {
     fi
 }
 
+#####################################################################
+# TAG HANDLER -> Get next available tag ID
+get_next_tag_id() {
+
+    local file="$1"
+    local tag="$2"
+
+    local max_id=$(grep "# wg-autoconf $tag start id" "$file" 2>/dev/null | sed 's/.*id //g' | sort -n | tail -1)
+
+    [ -z "$max_id" ] && max_id=0
+
+    echo $((max_id + 1))
+}
+#####################################################################
+# TAG HANDLER -> Remove tagged blocks from config files by ID
+remove_tagged_block() {
+
+    local file="$1"
+    local tag="$2"
+    local tag_id="$3"
+
+    [ -f "$file" ] || error "$file does not exist!"
+
+    # 1. VERIFY IF TAGGED WITH THIS ID
+    if ! grep -q "# wg-autoconf $tag start id $tag_id" "$file" 2>/dev/null; then
+
+        warning "Tag '$tag' with id $tag_id not found in $file. Skipping..."
+        return 0
+    fi
+
+    # 2. CREATE TMP BACKUP BEFORE REMOVING & UNTAG
+    local temp_file="/tmp/wg-autoconf-remove-${tag}-${tag_id}-$$.tmp"
+
+    sed -n "/# wg-autoconf $tag start id $tag_id/,/# wg-autoconf $tag end id $tag_id/!p" "$file" > "$temp_file" 2>/dev/null
+
+    # 3. RESTORE FROM TEMP
+    if [ -s "$temp_file" ]; then
+
+        mv "$temp_file" "$file" 2>/dev/null || error "Failed to remove block from $file"
+        success "Removed '$tag' block (id: $tag_id) from $file"
+
+    else
+
+        rm "$temp_file" 2>/dev/null
+        error "Failed to process $file while removing '$tag' block (id: $tag_id)"
+    fi
+
+}
+
+
+
+
+#####################################################################
+# GET ALL WG INTERFACES FROM UCI
+get_all_wg_interfaces() {
+
+    uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | cut -d. -f2 | cut -d= -f1 | sort -u
+}
+
+#####################################################################
+# VALIDATE INTERFACE NAME (must start with wg)
+validate_iface_name() {
+
+    local iface="$1"
+
+    if ! echo "$iface" | grep -q "^wg"; then
+        error "Interface name must start with 'wg'"
+    fi
+}
+
+#####################################################################
+# CHECK IF INTERFACE ALREADY EXISTS
+iface_exists() {
+
+    local iface="$1"
+
+    uci get "network.$iface" >/dev/null 2>&1
+}
+
+#####################################################################
+# CHECK IF ADDRESS ALREADY EXISTS IN ANOTHER INTERFACE
+address_exists() {
+
+    local address="$1"
+    local exclude_iface="${2:-}"
+
+    local existing_ifaces=$(get_all_wg_interfaces)
+
+    for iface in $existing_ifaces; do
+        [ "$iface" = "$exclude_iface" ] && continue
+
+        local existing_addr=$(uci get "network.$iface.addresses" 2>/dev/null)
+        if [ "$existing_addr" = "$address" ]; then
+            echo "$iface"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+#####################################################################
+# WG KEY HANDLER -> CLEANING
+clean_wg_key() {
+
+    local key="$1"
+
+    key=$(echo "$key" | sed 's/^[ \t]*//;s/[ \t]*$//')
+    key=$(echo "$key" | tr -d '\r\n')
+    [ "${key:0:1}" = "+" ] && key="${key:1}"
+
+    local len=${#key}
+    [ $len -eq 43 ] && key="${key}="
+
+    echo "$key"
+}
+
+
+#####################################################################
+# WG CONF HANDLER -> Extracting keys
+get_conf_value() {
+
+    local key="$1"
+    local file="$2"
+
+    grep "^$key[ \t]*=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^[ \t]*//;s/[ \t]*$//'
+}
+
+#####################################################################
+# WG/OpenWRT Network ALLOWED IPS
+process_allowed_ips() {
+
+    local ips="$1"
+
+    ips=$(echo "$ips" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+    echo "$ips" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' | grep -v '^$'
+}
+
+#####################################################################
+# NETMASK TO CIDR converter
+netmask_to_cidr() {
+    local mask="$1"
+
+    case "$mask" in
+        255.255.255.0)   echo 24 ;;
+        255.255.255.128) echo 25 ;;
+        255.255.255.192) echo 26 ;;
+        255.255.255.224) echo 27 ;;
+        255.255.255.240) echo 28 ;;
+        255.255.255.248) echo 29 ;;
+        255.255.255.252) echo 30 ;;
+        255.255.0.0)     echo 16 ;;
+        255.0.0.0)       echo 8 ;;
+        *)               echo 24 ;;
+    esac
+}
+
+#####################################################################
+# IP to network address converter
+ip_to_network() {
+    local ip="$1"
+    local cidr="$2"
+
+    case "$cidr" in
+        24)
+            echo "${ip%.*}.0"
+            ;;
+        25|26|27|28|29)
+
+            local octet=${ip##*.}
+            local bits=$((32 - cidr))
+
+            local step=1 i
+            i=0
+
+            while [ $i -lt $bits ]; do
+                step=$((step * 2))
+                i=$((i + 1))
+            done
+
+            step=$((256 / step))
+
+            local net=$(( (octet / step) * step ))
+
+            echo "${ip%.*}.$net"
+            ;;
+        16)
+            echo "${ip%.*.*}.0"
+            ;;
+        8)
+            echo "${ip%.*.*.*}.0"
+            ;;
+        *)
+            echo "${ip%.*}.0"
+            ;;
+    esac
+}
+
 
 #####################################################################
 # ██╗  ██╗███████╗██╗     ██████╗
@@ -85,45 +284,62 @@ ui_lines() {
 # ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝
 #####################################################################
 show_usage() {
-
     echo ""
     ui_lines 80 "WireGuard Auto-Config for OpenWrt $VERSION"
-    echo "Usage: wg-autoconf <cmd> [args]"
-    ui_lines 10
-    echo "COMMANDS:"
-    echo " "
-    echo "  list                           - List all .conf files"
-    echo "  list-full                      - List all .conf + all interfaces (detailed)"
-    echo "  test <conf_name>               - Test .conf file"
-    echo "  setup <conf_name>              - Setup from .conf (creates wg-<conf_name>)"
-    echo "  setup --advanced               - Interactive setup (manual naming)"
-    echo "  setup --advanced [conf]        - Advanced with .conf defaults"
-    echo " "
-    echo "  status                         - Show all WG interfaces"
-    echo "  status <wg_iface>              - Show specific WG interface"
-    echo "  up <wg_iface>                  - Enable WG interface"
-    echo "  down <wg_iface>                - Disable WG interface"
-    echo "  remove <wg_iface>              - Delete WG interface (unsetup)"
-    echo " "
-    echo "  routes show                    - Show all routes"
-    echo "  routes show <wg_iface>         - Show routes for WG interface"
-    echo "  routes set <wg_iface> <lan>    - Set routes: LAN -> WG"
-    echo "  routes unset <wg_iface> <lan>  - Unset routes: LAN -> WG"
-    echo " "
-    echo "  backups show                   - List available backups"
-    echo "  backups restore [name]         - Restore backup files"
-    echo " "
-    echo "  clean                          - Clean WG configs (interactive)"
-    echo "  clean <wg_iface>               - Clean specific interface"
-    echo "  nuke-all                       - DESTRUCTIVE: Remove ALL WG configs (no prompts)"
-    echo "  cleanup emergency              - Manual interface selection"
-    ui_lines 10
-    echo "Examples:"
-    echo "  wg-autoconf setup us21 / wg-autoconf setup --advanced"
-    echo "  wg-autoconf up wg-us21 / wg-autoconf down wg-us21"
-    echo "  wg-autoconf routes set wg-us21 lan4"
-    echo "  wg-autoconf remove wg-us21"
-    echo "  wg-autoconf clean / wg-autoconf clean wg-us21"
+    echo ""
+
+    # HEADER - Azul para el comando principal
+    echo -e "${BLUE}Usage:${NC} wg-autoconf <cmd> [args]"
+    echo ""
+
+    # SECTION 1: Configuration Management - Verde para operaciones "creativas"
+    echo -e "${GREEN}Configuration Management:${NC}"
+    echo -e "  ${YELLOW}list${NC}                           - List all .conf files"
+    echo -e "  ${YELLOW}list-full${NC}                      - List all .conf + all interfaces (detailed)"
+    echo -e "  ${YELLOW}test${NC} <conf_name>               - Test .conf file"
+    echo -e "  ${YELLOW}setup${NC} <conf_name>              - Setup from .conf (creates wg-<conf_name>)"
+    echo -e "  ${YELLOW}setup --advanced${NC}               - Interactive setup (manual naming)"
+    echo -e "  ${YELLOW}setup --advanced [conf]${NC}        - Advanced with .conf defaults"
+    echo ""
+
+    # SECTION 2: Interface Control - Cian/Azul para operaciones de estado
+    echo -e "${BLUE}Interface Control:${NC}"
+    echo -e "  ${YELLOW}status${NC}                         - Show all WG interfaces"
+    echo -e "  ${YELLOW}status${NC} <wg_iface>              - Show specific WG interface"
+    echo -e "  ${YELLOW}up${NC} <wg_iface>                  - Enable WG interface"
+    echo -e "  ${YELLOW}down${NC} <wg_iface>                - Disable WG interface"
+    echo -e "  ${YELLOW}remove${NC} <wg_iface>              - Delete WG interface (unsetup)"
+    echo ""
+
+    # SECTION 3: Routing - Naranja/amarillo para operaciones de red
+    echo -e "${YELLOW}Routing & Traffic Control:${NC}"
+    echo -e "  ${YELLOW}routes show${NC}                    - Show all routes"
+    echo -e "  ${YELLOW}routes show${NC} <wg_iface>         - Show routes for WG interface"
+    echo -e "  ${YELLOW}routes set${NC} <wg_iface> <lan>    - Set routes: LAN -> WG"
+    echo -e "  ${YELLOW}routes unset${NC} <wg_iface> <lan>  - Unset routes: LAN -> WG"
+    echo ""
+
+    # SECTION 4: Backup & Recovery - Magenta/morado para operaciones de seguridad
+    echo -e "\033[0;35mBackup & Recovery:\033[0m"
+    echo -e "  ${YELLOW}backups show${NC}                   - List available backups"
+    echo -e "  ${YELLOW}backups restore${NC} [name]         - Restore backup files"
+    echo ""
+
+    # SECTION 5: Cleanup - Rojo para operaciones destructivas
+    echo -e "${RED}Cleanup Operations:${NC}"
+    echo -e "  ${YELLOW}clean${NC}                          - Clean WG configs (interactive)"
+    echo -e "  ${YELLOW}clean${NC} <wg_iface>               - Clean specific interface"
+    echo -e "  ${RED}nuke-all${NC}                       - ${RED}DESTRUCTIVE: Remove ALL WG configs (no prompts)${NC}"
+
+    ui_lines 50
+    echo -e "${GREEN}Examples:${NC}"
+    echo -e "  ${YELLOW}wg-autoconf setup us21${NC} / ${YELLOW}wg-autoconf setup --advanced${NC}"
+    echo -e "  ${YELLOW}wg-autoconf up wg-us21${NC} / ${YELLOW}wg-autoconf down wg-us21${NC}"
+    echo -e "  ${YELLOW}wg-autoconf routes set${NC} wg-us21 lan4"
+    echo -e "  ${YELLOW}wg-autoconf routes unset${NC} wg-us21 lan4"
+    echo -e "  ${YELLOW}wg-autoconf remove wg-us21${NC}"
+    echo -e "  ${YELLOW}wg-autoconf clean${NC} / ${YELLOW}wg-autoconf clean wg-us21${NC}"
+    echo -e "  ${RED}wg-autoconf nuke-all${NC}"
     ui_lines 80
     exit 1
 }
@@ -1327,6 +1543,141 @@ show_status() {
     done
 }
 
+#####################################################################
+# ██████╗  █████╗  ██████╗██╗  ██╗██╗   ██╗██████╗ ███████╗
+# ██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██║   ██║██╔══██╗██╔════╝
+# ██████╔╝███████║██║     █████╔╝ ██║   ██║██████╔╝███████╗
+# ██╔══██╗██╔══██║██║     ██╔═██╗ ██║   ██║██╔═══╝ ╚════██║
+# ██████╔╝██║  ██║╚██████╗██║  ██╗╚██████╔╝██║     ███████║
+# ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚══════╝
+#####################################################################
+
+#####################################################################
+# TAG HANDLER -> Backup config files
+backup_config_file() {
+
+    local file="$1"
+    local backup_file="${file}.BACKUP_PRE_WIREGUARD"
+
+    [ -f "$backup_file" ] && return 0
+
+    cp "$file" "$backup_file" 2>/dev/null || error "Failed to backup $file"
+
+    success "Backed up $file → $backup_file"
+}
+#####################################################################
+# TAG HANDLER -> Show backup files
+show_backups() {
+
+    log "Available backup files:"
+    echo ""
+
+    backup_found=0
+
+    for path in $BACKUP_PATHS; do
+        backup_file="${path}.BACKUP_PRE_WIREGUARD"
+
+        if [ -f "$backup_file" ]; then
+            backup_found=1
+            backup_size=$(ls -lh "$backup_file" | awk '{print $5}')
+            backup_date=$(ls -l "$backup_file" | awk '{print $6" "$7" "$8}')
+
+            echo "  ${GREEN}✓${NC} $(basename $path)"
+            echo "      Path: $backup_file"
+            echo "      Size: $backup_size | Date: $backup_date"
+            echo ""
+        fi
+    done
+
+    if [ $backup_found -eq 0 ]; then
+        warning "No backup files found!"
+        return 1
+    fi
+
+    return 0
+}
+
+
+#####################################################################
+# TAG HANDLER -> Restore backup files
+restore_backups() {
+
+    local file_to_restore="$1"
+
+    log "Restoring backup files..."
+    echo ""
+
+    restore_count=0
+
+    for path in $BACKUP_PATHS; do
+        backup_file="${path}.BACKUP_PRE_WIREGUARD"
+        config_name=$(basename "$path")
+
+        if [ -n "$file_to_restore" ] && [ "$config_name" != "$file_to_restore" ]; then
+            continue
+        fi
+
+        if [ ! -f "$backup_file" ]; then
+            warning "Backup not found for $config_name. Skipping..."
+            continue
+        fi
+
+        printf "Restore $config_name? (y/N): "
+        read -r response
+
+        case "$response" in
+            y|Y|yes|YES|Yes)
+                cp "$backup_file" "$path" 2>/dev/null || error "Failed to restore $path"
+                success "Restored $config_name from backup"
+                restore_count=$((restore_count + 1))
+                ;;
+            *)
+                log "Skipped $config_name"
+                ;;
+        esac
+    done
+
+    echo ""
+
+    if [ $restore_count -eq 0 ]; then
+        warning "No files were restored"
+        return 1
+    fi
+
+    success "$restore_count file(s) restored. Committing changes..."
+    echo ""
+
+    printf "Commit changes to system? (y/N): "
+    read -r confirm_commit
+
+    case "$confirm_commit" in
+        y|Y|yes|YES|Yes)
+
+            uci commit network 2>/dev/null && success "network committed"
+            uci commit dhcp 2>/dev/null && success "dhcp committed"
+            uci commit firewall 2>/dev/null && success "firewall committed"
+            ;;
+        *)
+
+            warning "Changes NOT committed. Manual commit required"
+            echo "  uci commit network"
+            echo "  uci commit dhcp"
+            echo "  uci commit firewall"
+            ;;
+    esac
+
+    return 0
+}
+
+
+cleanup_backup_files() {
+
+    log "Removing backup files..."
+
+    rm -f /etc/config/*.BACKUP_PRE_WIREGUARD 2>/dev/null
+
+    success "Backup files cleaned"
+}
 
 #####################################################################
 #
@@ -1866,8 +2217,6 @@ nuke_all() {
 #
 #####################################################################
 show_routes() {
-
-
     local filter_wg_iface="$1"
 
     log "WireGuard routes:"
@@ -1922,7 +2271,6 @@ show_routes() {
         done
 
     else
-    
         # -------------------------------------------------------------------
         # 2b. UNFILTERED MODE: SHOW ALL WIREGUARD ROUTES
         # -------------------------------------------------------------------
@@ -2007,8 +2355,6 @@ show_routes() {
 #
 #####################################################################
 set_lan_routes() {
-
-
     local wg_iface="$1"
     local lan_iface="$2"
 
@@ -2086,13 +2432,10 @@ set_lan_routes() {
         # ROUTE ADD WG
         ip route add default dev "$wg_iface" table "$table_name"
         success "Route conf done!: $lan_iface through $wg_iface"
-        
         echo "   ANY device from $subnet will use WireGuard ($wg_iface)"
 
     else
-        
         warning "$wg_iface does NOT exist yet!"
-        
         echo "   $lan_iface WONT work unless $wg_iface is active!"
         echo "   To activate: wg-autoconf up $wg_iface"
 
@@ -2108,14 +2451,14 @@ set_lan_routes() {
 
     if [ -n "$fw_line" ]; then
 
-    
     # EXTRACT ITS OWN FIREWALL TAG ID
-        
         local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
 
         if [ -n "$fw_tag_id" ] && grep -q "# wg-autoconf firewall end id $fw_tag_id" "$FIREWALL_CONF"; then
 
             # CHECK MATCH
+            #  TEST
+            # if ! grep -q "option src '$lan_iface'" "$FIREWALL_CONF" 2>/dev/null || ! grep -q "option dest '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null; then
             if ! grep -q "option src '$lan_iface'" "$FIREWALL_CONF" 2>/dev/null | grep -q "option dest '$wg_iface'" 2>/dev/null; then
 
             # THEN, ON LAST NUMBER
@@ -2299,16 +2642,6 @@ case "$1" in
         ;;
     nuke-all)
         nuke_all
-        ;;
-    cleanup)
-        case "$2" in
-            emergency)
-                cleanup_emergency
-                ;;
-            *)
-                cleanup_all "$2"
-                ;;
-        esac
         ;;
     backups)
         case "$2" in
