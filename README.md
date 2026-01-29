@@ -1,7 +1,7 @@
 # wg-autoconf for OpenWRT
-**Last Updated:** *2026-01-29*
-**Version:** *1.0.0r3*
-Automated WireGuard configuration tool for OpenWrt, making easy the interface setup, routing policies, firewall rules, even multiple simultaneous wireguard clients at the same time, via (ash) CLI.
+**Last Updated:** *2026-01-29*  
+**Version:** *1.0.0r3*  
+Automated WireGuard configuration tool for OpenWrt, making easy the interface setup, routing policies, firewall rules, even multiple simultaneous wireguard clients at the same time, via (ash) CLI.  
 
 ---
 
