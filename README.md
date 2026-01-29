@@ -142,7 +142,7 @@ Full help & usage: `wg-autoconf --help`
 ## Design
 
 - **Policy-based routing:** Route only specific LANs through VPN
-- **Multiple simultaneous tunnels. Each isolated with own firewall zone & configs.
+- **Multiple simultaneous tunnels**. Each isolated with own firewall zone & configs.
 - Automatic firewall/dnsmasq/network configuratios, bidirectional forwarding, no manual config needed.
 - Safe add/removal configurations without breaking other configs
 - **Address collision detection:** Prevents accidental conflicts
