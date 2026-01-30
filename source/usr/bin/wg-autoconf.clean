@@ -1,10 +1,13 @@
-VERSION="v1.0.0r3"
+VERSION="v1.0.0r4"
 WG_CONF_DIR="/etc/wireguard"
 NETWORK_CONF="/etc/config/network"
 DHCP_CONF="/etc/config/dhcp"
 FIREWALL_CONF="/etc/config/firewall"
 LOG_DIR="/etc/libexec/wg-autoconf/logs"
 BACKUP_PATHS="$NETWORK_CONF $DHCP_CONF $FIREWALL_CONF"
+ADVANCED_MODE=0
+CONF_NAME=""
+VERBOSE=0
 RED='\033[1;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -51,7 +54,7 @@ remove_tagged_block() {
     sed -n "/# wg-autoconf $tag start id $tag_id/,/# wg-autoconf $tag end id $tag_id/!p" "$file" > "$temp_file" 2>/dev/null
     if [ -s "$temp_file" ]; then
         mv "$temp_file" "$file" 2>/dev/null || error "Failed to remove block from $file"
-        success "Removed '$tag' block (id: $tag_id) from $file"
+        verbose success "Removed '$tag' block (id: $tag_id) from $file"
     else
         rm "$temp_file" 2>/dev/null
         error "Failed to process $file while removing '$tag' block (id: $tag_id)"
@@ -149,6 +152,19 @@ ip_to_network() {
             ;;
     esac
 }
+verbose() {
+    if [ "$VERBOSE" = "1" ]; then
+        "$@"
+    fi
+}
+show_header() {
+    echo ""
+    echo -e "${GREEN}WireGuard Auto-Config${NC} for OpenWrt ${RED}$VERSION${NC}"
+    echo ""
+    echo "   Usage: wg-autoconf COMMAND [args]"
+    echo -e "   ${YELLOW}'wg-autoconf --help' for full help${NC}"
+    echo ""
+}
 show_usage() {
     echo ""
     ui_lines 80 "${GREEN}WireGuard Auto-Config${NC} for OpenWrt ${RED}$VERSION${NC}"
@@ -157,9 +173,9 @@ show_usage() {
     echo ""
     echo -e "${GREEN}Configuration Management:${NC}"
     echo -e "  ${YELLOW}list${NC}                           - List all .conf files"
-    echo -e "  ${YELLOW}list-full${NC}                      - List all .conf + all interfaces (detailed)"
-    echo -e "  ${YELLOW}test${NC} <conf_name>               - Test .conf file"
-    echo -e "  ${YELLOW}setup${NC} <conf_name>              - Setup from .conf (creates wg-<conf_name>)"
+    echo -e "  ${YELLOW}list${NC} <conf name>               - Show configuration"
+    echo -e "  ${YELLOW}test${NC} <CONF_NAME>               - Test .conf file"
+    echo -e "  ${YELLOW}setup${NC} <CONF_NAME>              - Setup from .conf (creates wg-<CONF_NAME>)"
     echo -e "  ${YELLOW}setup --advanced${NC}               - Interactive setup (manual naming)"
     echo -e "  ${YELLOW}setup --advanced [conf]${NC}        - Advanced with .conf defaults"
     echo ""
@@ -176,15 +192,21 @@ show_usage() {
     echo -e "  ${YELLOW}routes set${NC} <wg_iface> <lan>    - Set routes: LAN -> WG"
     echo -e "  ${YELLOW}routes unset${NC} <wg_iface> <lan>  - Unset routes: LAN -> WG"
     echo ""
-    echo -e "\033[0;35mBackup & Recovery:\033[0m"
+    echo -e "\033[0;35mBackup/Recovery & Upgrade:\033[0m"
     echo -e "  ${YELLOW}backups show${NC}                   - List available backups"
     echo -e "  ${YELLOW}backups restore${NC} [name]         - Restore backup files"
+    echo ""
+    echo -e "  ${YELLOW}upgrade${NC} [name]                  - Upgrade wg-autoconf safely"
     echo ""
     echo -e "${RED}Cleanup Operations:${NC}"
     echo -e "  ${YELLOW}clean${NC}                          - Clean WG configs (interactive)"
     echo -e "  ${YELLOW}clean${NC} <wg_iface>               - Clean specific interface"
-    echo -e "  ${RED}nuke-all${NC}                       - ${RED}DESTRUCTIVE: Remove ALL WG configs (no prompts)${NC}"
-    ui_lines 50
+    echo -e "  ${RED}nuke${NC}                           - ${RED}Remove ALL WG configs (no prompts)${NC}"
+    echo""
+    echo -e "${GREEN}Available arguments:${NC}"
+    echo ""
+    echo -e "  ${YELLOW}--verbose / -v${NC}                 - Verbose mode for any command"
+    echo ""
     echo -e "${GREEN}Examples:${NC}"
     echo -e "  ${YELLOW}wg-autoconf setup us21${NC} / ${YELLOW}wg-autoconf setup --advanced${NC}"
     echo -e "  ${YELLOW}wg-autoconf up wg-us21${NC} / ${YELLOW}wg-autoconf down wg-us21${NC}"
@@ -192,71 +214,84 @@ show_usage() {
     echo -e "  ${YELLOW}wg-autoconf routes unset${NC} wg-us21 lan4"
     echo -e "  ${YELLOW}wg-autoconf remove wg-us21${NC}"
     echo -e "  ${YELLOW}wg-autoconf clean${NC} / ${YELLOW}wg-autoconf clean wg-us21${NC}"
-    echo -e "  ${RED}wg-autoconf nuke-all${NC}"
+    echo -e "  ${RED}wg-autoconf nuke${NC}"
     ui_lines 80
+    verbose ui_lines 50 " VERBOSE MODE ON TEST"
     exit 1
 }
 list_configs() {
-    log ".conf files on $WG_CONF_DIR:"
-    echo ""
-    ui_lines 50
-    for conf in "$WG_CONF_DIR"/*.conf; do
-        [ -f "$conf" ] || continue
-        name=$(basename "$conf" .conf)
-        endpoint=$(get_conf_value "Endpoint" "$conf")
-        address=$(get_conf_value "Address" "$conf")
-        echo "  $name"
-        [ -n "$address" ] && echo "    IP: $address"
-        [ -n "$endpoint" ] && echo "    Endpoint: $endpoint"
+    local file_arg="$1"
+    if [ -n "$file_arg" ]; then
+        local conf_file="$WG_CONF_DIR/$file_arg.conf"
+        if [ ! -f "$conf_file" ]; then
+            error "Configuration file $file_arg not found!"
+        fi
+        log "Configuration file: $file_arg"
         echo ""
-    done
-    ui_lines 50
-}
-list_configs_full() {
-    log ".conf files + active interfaces (FULL):"
-    echo ""
-    ui_lines 50 "AVAILABLE CONFIG FILES"
-    echo ""
-    for conf in "$WG_CONF_DIR"/*.conf; do
-        [ -f "$conf" ] || continue
-        name=$(basename "$conf" .conf)
-        endpoint=$(get_conf_value "Endpoint" "$conf")
-        address=$(get_conf_value "Address" "$conf")
-        echo "$name"
-        [ -n "$address" ] && echo "  IP: $address"
-        [ -n "$endpoint" ] && echo "  Endpoint: $endpoint"
-    done
-    echo ""
-    ui_lines 50 "ACTIVE INTERFACES"
-    local interfaces=$(get_all_wg_interfaces)
-    if [ -z "$interfaces" ]; then
-        echo "    No active WireGuard interfaces"
+        echo -e "${BLUE}$(basename $conf_file)${NC}"
+        ui_lines 50
+        cat "$conf_file" | sed 's/^/   /'
+        echo ""
         ui_lines 50
         return
     fi
-    for iface in $interfaces; do
-        address=$(uci get "network.$iface.addresses" 2>/dev/null || echo "N/A")
-        endpoint_host=$(uci get "network.$iface.option endpoint_host" 2>/dev/null || echo "N/A")
-        endpoint_port=$(uci get "network.$iface.option endpoint_port" 2>/dev/null || echo "N/A")
-        echo "$iface"
-        echo "  Status: $(ip link show $iface 2>/dev/null | grep -q 'state UP' && echo 'UP' || echo 'DOWN')"
-        echo "  IP: $address"
-        echo "  Endpoint: $endpoint_host:$endpoint_port"
-        if wg show "$iface" >/dev/null 2>&1; then
-            latest=$(wg show "$iface" 2>/dev/null | grep "latest handshake" | head -1)
-            [ -n "$latest" ] && echo "  $latest"
-            transfer=$(wg show "$iface" 2>/dev/null | grep "transfer" | head -1)
-            [ -n "$transfer" ] && echo "  $transfer"
+    echo ""
+    log ".conf files on $WG_CONF_DIR:"
+    ui_lines 50
+    local count=0
+    local line=""
+    local found=0
+    for conf in "$WG_CONF_DIR"/*.conf; do
+        [ -f "$conf" ] || continue
+        found=1
+        name=$(basename "$conf" .conf)
+        if [ $count -eq 5 ]; then
+            echo -e "${GREEN}$line${NC}"
+            line="   $name"
+            count=1
+        else
+            if [ $count -eq 0 ]; then
+                line="   $name"
+            else
+                line="$line | $name"
+            fi
+            count=$((count + 1))
         fi
-        ui_lines 50
+    done
+    if [ $found -eq 0 ]; then
+        warning "No configuration files found in $WG_CONF_DIR"
+    else
+        [ -n "$line" ] && echo -e "${GREEN}$line${NC}"
+    fi
+    ui_lines 50
+}
+list_configs_full() {
+    log ".conf files (FULL):"
+    echo ""
+    ui_lines 50
+    local found=0
+    for conf in "$WG_CONF_DIR"/*.conf; do
+        [ -f "$conf" ] || continue
+        found=1
+        echo -e "${BLUE}$(basename $conf)${NC}"
+        ui_lines 40
+        cat "$conf" | sed 's/^/   /'
+        echo ""
+        ui_lines 40
         echo ""
     done
+    if [ $found -eq 0 ]; then
+        warning "No configuration files found in $WG_CONF_DIR"
+        ui_lines 50
+    else
+        ui_lines 50
+    fi
 }
 test_config() {
-    local conf_name="$1"
-    local conf_file="$WG_CONF_DIR/$conf_name.conf"
+    local CONF_NAME="$1"
+    local conf_file="$WG_CONF_DIR/$CONF_NAME.conf"
     [ -f "$conf_file" ] || error "[ERROR] $conf_file does not exist!"
-    log "Testing $conf_name.conf..."
+    log "Testing $CONF_NAME.conf..."
     private_key_raw=$(get_conf_value "PrivateKey" "$conf_file")
     public_key_raw=$(get_conf_value "PublicKey" "$conf_file")
     [ -z "$private_key_raw" ] && error "PrivateKey NOT FOUND!"
@@ -291,7 +326,7 @@ setup_network_config() {
     local endpoint_port="$6"
     local allowed_ips="$7"
     local dns="$8"
-    log "Setting up NETWORK config for $iface_name..."
+    verbose log "Setting up NETWORK config for $iface_name..."
     local tag_id=$(get_next_tag_id "$NETWORK_CONF" "network")
     if grep -q "# wg-autoconf network start id $tag_id" "$NETWORK_CONF" 2>/dev/null; then
         warning "NETWORK tag with id $tag_id already exists. Skipping..."
@@ -318,11 +353,11 @@ EOF
     cat >> "$NETWORK_CONF" << EOF
 # wg-autoconf network end id $tag_id
 EOF
-    success "Added NETWORK config for $iface_name (id: $tag_id)"
+    verbose success "Added NETWORK config for $iface_name (id: $tag_id)"
 }
 setup_dhcp_config() {
     local iface_name="$1"
-    log "Setting up DHCP config for $iface_name..."
+    verbose log "Setting up DHCP config for $iface_name..."
     local tag_id=$(get_next_tag_id "$DHCP_CONF" "dhcp")
     if grep -q "# wg-autoconf dhcp start id $tag_id" "$DHCP_CONF" 2>/dev/null; then
         warning "DHCP tag with id $tag_id already exists. Skipping..."
@@ -335,12 +370,12 @@ config dhcp '$iface_name'
     option ignore '1'
 # wg-autoconf dhcp end id $tag_id
 EOF
-    success "Added DHCP config for $iface_name (id: $tag_id)"
+    verbose success "Added DHCP config for $iface_name (id: $tag_id)"
 }
 setup_firewall_config() {
     local iface_name="$1"
     local endpoint_port="$2"
-    log "Setting up Firewall config for $iface_name..."
+    verbose log "Setting up Firewall config for $iface_name..."
     local tag_id=$(get_next_tag_id "$FIREWALL_CONF" "firewall")
     if grep -q "# wg-autoconf firewall start id $tag_id" "$FIREWALL_CONF" 2>/dev/null; then
         warning "Firewall tag with id $tag_id already exists. Skipping..."
@@ -368,13 +403,13 @@ config forwarding
 # wg-autoconf firewall end id $tag_id
 EOF
     /etc/init.d/firewall reload 2> /dev/null
-    success "Added Firewall config for $iface_name (id: $tag_id, port: $endpoint_port)"
+    verbose success "Added Firewall config for $iface_name (id: $tag_id, port: $endpoint_port)"
 }
 setup_wireguard() {
-    local conf_name="$1"
-    local conf_file="$WG_CONF_DIR/$conf_name.conf"
+    local CONF_NAME="$1"
+    local conf_file="$WG_CONF_DIR/$CONF_NAME.conf"
     [ -f "$conf_file" ] || error "$conf_file is missing!!!"
-    log "Setting up wg from $conf_name.conf..."
+    log "Setting up wg from $CONF_NAME.conf..."
     private_key_raw=$(get_conf_value "PrivateKey" "$conf_file")
     public_key_raw=$(get_conf_value "PublicKey" "$conf_file")
     address=$(get_conf_value "Address" "$conf_file")
@@ -387,7 +422,7 @@ setup_wireguard() {
     public_key=$(clean_wg_key "$public_key_raw")
     endpoint_host=$(echo "$endpoint" | cut -d: -f1)
     endpoint_port=$(echo "$endpoint" | cut -d: -f2)
-    local iface_name="wg_$conf_name"
+    local iface_name="wg_$CONF_NAME"
     if iface_exists "$iface_name"; then
         warning "$iface_name already exists! Use --advanced mode!"
         log "WG-AUTOCONF setup CANCELLED!"
@@ -417,18 +452,18 @@ setup_wireguard() {
     echo ""
     success "D0ne!"
     echo ""
-    ui_lines 80 "${GREEN}WireGuard CONFIG${NC}"
+    ui_lines 65 "${GREEN}WireGuard CONFIG${NC}"
     echo -e "${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
     echo -e "${BLUE}Local IP:${NC}            ${YELLOW}$address${NC}"
     echo -e "${BLUE}Endpoint:${NC}            ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
     echo -e "${BLUE}DNS:${NC}                 ${YELLOW}1.1.1.1 1.0.0.1${NC}"
-    ui_lines 50 "${GREEN}FINISH SETUP${NC}"
+    ui_lines 65 "${GREEN}FINISH SETUP${NC}"
     echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
     echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
     echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
     echo -e "${GREEN}4.${NC} ${BLUE}ROUTE LANs:${NC}        ${YELLOW}wg-autoconf routes set $iface_name <lan_iface>${NC}"
     echo ""
-    ui_lines 80
+    ui_lines 65
     }
 setup_wireguard_advanced() {
     local conf_from_file="$1"
@@ -438,8 +473,7 @@ setup_wireguard_advanced() {
         if [ ! -f "$conf_file" ]; then
             error "$conf_file does not exist!"
         fi
-        l
-        og "Loading defaults from $conf_from_file.conf..."
+        log "Loading defaults from $conf_from_file.conf..."
     fi
     log "Starting ADVANCED setup (manual configuration)..."
     echo ""
@@ -688,14 +722,23 @@ activate_interface() {
     [ -z "$iface" ] && error "Interface name required!"
     uci get "network.$iface" >/dev/null 2>&1 || error "$iface DOES NOT exist"
     validate_iface_name "$iface"
-    log "Enabling $iface..."
+    verbose log "Enabling $iface..."
     if ifup "$iface" >/dev/null 2>&1; then
+        sleep 1
         success "$iface enabled!"
         echo ""
-        echo "Test commands:"
-        echo "  wg show $iface"
+        echo "$iface Info:"
+        until ip link show "$iface" >/dev/null 2>&1; do
+            sleep 0.2
+        done
+        verbose wg show "$iface"
+        echo ""
+        echo -e "${YELLOW}Now you can set up routes if needed!${NC} "
     else
-        error "Errors found enabling $iface. Check logread | tail -20"
+        verbose echo ""
+        verbose sh -c logread | tail -10
+        verbose echo ""
+        error "Errors found enabling $iface. Check logread"
     fi
 }
 deactivate_interface() {
@@ -779,7 +822,7 @@ backup_config_file() {
     local backup_file="${file}.BACKUP_PRE_WIREGUARD"
     [ -f "$backup_file" ] && return 0
     cp "$file" "$backup_file" 2>/dev/null || error "Failed to backup $file"
-    success "Backed up $file -> $backup_file"
+    verbose success "Backed up $file -> $backup_file"
 }
 show_backups() {
     log "Available backup files:"
@@ -791,9 +834,9 @@ show_backups() {
             backup_found=1
             backup_size=$(ls -lh "$backup_file" | awk '{print $5}')
             backup_date=$(ls -l "$backup_file" | awk '{print $6" "$7" "$8}')
-            echo "  ${GREEN}✓${NC} $(basename $path)"
-            echo "      Path: $backup_file"
-            echo "      Size: $backup_size | Date: $backup_date"
+            success "$(basename $path)"
+            echo -e "      Path: ${YELLOW}$backup_file${NC}"
+            echo -e "      Size: ${YELLOW}$backup_size${NC} | Date: ${YELLOW}$backup_date${NC}"
             echo ""
         fi
     done
@@ -856,9 +899,9 @@ restore_backups() {
     return 0
 }
 cleanup_backup_files() {
-    log "Removing backup files..."
+    verbose log "Removing backup files..."
     rm -f /etc/config/*.BACKUP_PRE_WIREGUARD 2>/dev/null
-    success "Backup files cleaned"
+    verbose success "Backup files cleaned"
 }
 clean_wireguard_interactive() {
     local filter_iface="$1"
@@ -944,7 +987,7 @@ clean_wireguard_interactive() {
     fi
 }
 cleanup_wireguard_routes() {
-    log "Cleaning up WireGuard routing tables and interfaces..."
+    verbose log "Cleaning up WireGuard routing tables and interfaces..."
     for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z-]*" | sort -u); do
         ip link delete "$iface" 2>/dev/null
         success "Deleted interface: $iface"
@@ -952,13 +995,13 @@ cleanup_wireguard_routes() {
     if [ -f /etc/iproute2/rt_tables ]; then
         grep -v "_vpn_" /etc/iproute2/rt_tables > /tmp/rt_tables.tmp 2>/dev/null
         mv /tmp/rt_tables.tmp /etc/iproute2/rt_tables
-        success "VPN routing tables removed!"
+        verbose success "VPN routing tables removed!"
     fi
     ip rule show 2>/dev/null | grep "_vpn_" | while read -r line; do
         rule_num=$(echo "$line" | awk '{print $1}' | sed 's/:$//')
         [ -n "$rule_num" ] && ip rule del prio "$rule_num" 2>/dev/null
     done
-    success "WireGuard routing rules flushed!"
+    verbose success "WireGuard routing rules flushed!"
 }
 cleanup_config_files() {
     local force_yes="${1:-0}"
@@ -978,22 +1021,22 @@ cleanup_config_files() {
     uci commit firewall 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit network 2>/dev/null
-    success "Configuration files cleaned"
+    verbose success "Configuration files cleaned"
     echo ""
     if [ $force_yes -eq 1 ]; then
-        log "Restoring from backups (automatic mode)..."
+        verbose log "Restoring from backups (automatic mode)..."
         for path in $BACKUP_PATHS; do
             backup_file="${path}.BACKUP_PRE_WIREGUARD"
             config_name=$(basename "$path")
             if [ -f "$backup_file" ]; then
                 cp "$backup_file" "$path" 2>/dev/null
-                success "Restored $config_name"
+                verbose success "Restored $config_name"
             fi
         done
         uci commit network 2>/dev/null
         uci commit dhcp 2>/dev/null
         uci commit firewall 2>/dev/null
-        success "Backups restored and committed"
+        verbose success "Backups restored and committed"
         cleanup_backup_files
     else
         read -p "Restore configs from backups? (y/N): " restore_choice
@@ -1023,17 +1066,16 @@ cleanup_config_files() {
 nuke_all() {
     log "NUKE CLEANUP MODE - Removing ALL WireGuard configurations without asking"
     echo ""
-    echo ""
     local interfaces=$(get_all_wg_interfaces)
     if [ -n "$interfaces" ]; then
         log "Taking down all WireGuard interfaces..."
         for iface in $interfaces; do
             ifdown "$iface" 2>/dev/null
-            success "Downed: $iface"
+            verbose success "Downed: $iface"
         done
-        echo ""
+        verbose echo ""
     fi
-    log "Removing configuration blocks..."
+    verbose log "Removing configuration blocks..."
     local all_network_ids=$(grep "# wg-autoconf network start id" "$NETWORK_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_dhcp_ids=$(grep "# wg-autoconf dhcp start id" "$DHCP_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_firewall_ids=$(grep "# wg-autoconf firewall start id" "$FIREWALL_CONF" 2>/dev/null | sed 's/.*id //g')
@@ -1049,12 +1091,12 @@ nuke_all() {
     uci commit network 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
-    success "Configuration files cleaned"
-    echo ""
-    log "Cleaning routing tables and rules..."
+    verbose success "Configuration files cleaned"
+    verbose echo ""
+    verbose log "Cleaning routing tables and rules..."
     cleanup_wireguard_routes
-    echo ""
-    log "Restoring from backups..."
+    verbose echo ""
+    verbose log "Restoring from backups..."
     for path in $BACKUP_PATHS; do
         backup_file="${path}.BACKUP_PRE_WIREGUARD"
         config_name=$(basename "$path")
@@ -1066,11 +1108,11 @@ nuke_all() {
     uci commit network 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
-    success "Backups restored and committed"
-    echo ""
+    verbose success "Backups restored and committed"
+    verbose echo ""
     cleanup_backup_files
-    echo ""
-    success "NUCLEAR CLEANUP COMPLETED - System ready for new setup!"
+    verbose echo ""
+    success "NUKE COMPLETED - System ready for new setup!"
 }
 show_routes() {
     local filter_wg_iface="$1"
@@ -1153,7 +1195,7 @@ set_lan_routes() {
     log "Setting up routes for $lan_iface ($subnet) -> $wg_iface..."
     if ! grep -q "$table_name" /etc/iproute2/rt_tables 2>/dev/null; then
         echo "150 $table_name" >> /etc/iproute2/rt_tables
-        success "Tabla creada: $table_name"
+        verbose success "Table: $table_name"
     fi
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip route flush table "$table_name" 2>/dev/null
@@ -1162,14 +1204,14 @@ set_lan_routes() {
     ip route add "$subnet" dev "$lan_iface" table "$table_name"
     if ip link show "$wg_iface" >/dev/null 2>&1; then
         ip route add default dev "$wg_iface" table "$table_name"
-        success "Route conf done!: $lan_iface through $wg_iface"
-        echo "   ANY device from $subnet will use WireGuard ($wg_iface)"
+        verbose success "Route conf done!: $lan_iface through $wg_iface"
+        verbose echo "   ANY device from $subnet will use WireGuard ($wg_iface)"
     else
         warning "$wg_iface does NOT exist yet!"
         echo "   $lan_iface WONT work unless $wg_iface is active!"
         echo "   To activate: wg-autoconf up $wg_iface"
     fi
-    log "Adding firewall forwarding rules..."
+    verbose log "Adding firewall forwarding rules..."
     local fw_line=$(grep -n "option name '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
     if [ -n "$fw_line" ]; then
         local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
@@ -1186,9 +1228,9 @@ config forwarding\\
     option src '$wg_iface'\\
     option dest '$lan_iface'\\
 " "$FIREWALL_CONF"
-                success "Firewall forwarding rules added"
+                verbose success "Firewall forwarding rules added"
             else
-                warning "Forwarding rules already exist for $lan_iface ↔ $wg_iface"
+                warning "Forwarding rules already exist for $lan_iface <--> $wg_iface"
             fi
         else
             warning "Firewall tag not found for $wg_iface"
@@ -1198,20 +1240,22 @@ config forwarding\\
     fi
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
+    verbose echo ""
+    verbose ui_lines 50 "${GREEN}WG ROUTE CONFS${NC}"
+    verbose ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
+    verbose ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
     echo ""
-    echo "=== WG ROUTE CONFS ==="
-    ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
-    ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
+    success "Wireguard routes already configured!"
 }
 unset_lan_routes() {
     local wg_iface="$1"
     local lan_iface="$2"
     local table_name="${lan_iface}_vpn_${wg_iface}"
-    log "Removing routes for $lan_iface (via $wg_iface)..."
+    verbose log "Removing routes for $lan_iface (via $wg_iface)..."
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
     ip route flush table "$table_name" 2>/dev/null
-    log "Removing firewall forwarding rules..."
+    verbose log "Removing firewall forwarding rules..."
     local fw_line=$(grep -n "option name '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
     if [ -n "$fw_line" ]; then
         local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
@@ -1236,60 +1280,166 @@ unset_lan_routes() {
                 { print }
             ' "$FIREWALL_CONF" | sed '/^[[:space:]]*$/N;/^\n$/!P;D' > "$FIREWALL_CONF.tmp"
             mv "$FIREWALL_CONF.tmp" "$FIREWALL_CONF"
-            success "Firewall rules removed"
+            verbose success "Firewall rules removed"
         fi
     fi
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
     success "$lan_iface routes (via $wg_iface) successfully removed!"
 }
-[ $# -eq 0 ] && show_usage
-advanced_mode=0
-conf_name=""
-case "$1" in
+upgrade_app() {
+    local option
+    local filepath
+    local upgrade_script="/tmp/wg-autoconf-upgrading.sh"
+    echo ""
+    ui_lines 50 "${GREEN}wg-autoconf${NC} ${RED}$VERSION${NC} ${YELLOW}UPGRADE Module${NC}"
+    verbose log "This feature allows you to update wg-autoconf easily, either from a local .apk file or directly from source."
+    verbose log "An executable will be created in /tmp to proceed with the installation, thereby releasing the main binary."
+    verbose echo ""
+    warning "Any active connection will be dropped during the update process!!!"
+    echo ""
+    echo -e "\e[1mPlease choose upgrade method:\e[0m"
+    echo "  1) Using a local .apk file"
+    echo "  2) From package sources"
+    echo "  0) Exit"
+    echo ""
+    while :; do
+        printf "Choose an option : "
+        read option
+        case "$option" in
+            1|2)
+                break
+                ;;
+            0|exit|EXIT|Exit)
+                warning "Upgrade cancelled by the user!"
+                exit 1
+                ;;
+            *)
+                echo "Invalid option!"
+                ;;
+        esac
+    done
+    echo ""
+    local apk_command=""
+    if [ "$option" = "1" ]; then
+        while :; do
+            printf "Enter path to local APK file (e.g., /tmp/file.apk): "
+            read filepath
+            if [ -z "$filepath" ]; then
+                echo "File path cannot be empty."
+                exit 1
+            fi
+            if ! [ -f "$filepath" ]; then
+                echo "File not found: $filepath"
+                exit 1
+            fi
+            if echo "$filepath" | grep "\.apk$" >/dev/null 2>&1; then
+                break
+            else
+                echo "File does not appear to be an APK file. Please provide a .apk file."
+            fi
+        done
+    fi
+    echo '#!/bin/sh' > "$upgrade_script"
+    echo '' >> "$upgrade_script"
+    echo '# wg-autoconf $VERSION UPDATER script' >> "$upgrade_script"
+    echo '' >> "$upgrade_script"
+    echo 'echo "Starting upgrade process..."' >> "$upgrade_script"
+    echo 'echo ""' >> "$upgrade_script"
+    echo '' >> "$upgrade_script"
+    echo "echo 'Executing: $apk_command'" >> "$upgrade_script"
+    echo 'echo ""' >> "$upgrade_script"
+    echo '' >> "$upgrade_script"
+    case "$option" in
+        1)
+            apk_command="apk add --force-overwrite \"$filepath\""
+            echo "$apk_command" >> $upgrade_script
+            ;;
+        2)
+            apk_command="apk add --upgrade wg-autoconf"
+            echo "$apk_command" >> $upgrade_script
+            ;;
+        *).
+            warning "Invalid option selected ($option). Aborting!"
+            exit 1
+            ;;
+    esac
+    echo '' >> "$upgrade_script"
+    echo 'echo ""' >> "$upgrade_script"
+    echo 'echo "Cleaning up temporary files..."' >> "$upgrade_script"
+    echo "rm -f $upgrade_script" >> "$upgrade_script"
+    echo '' >> "$upgrade_script"
+    echo 'echo ""' >> "$upgrade_script"
+    echo 'echo "Upgrade completed!"' >> "$upgrade_script"
+    chmod 755 "$upgrade_script"
+    echo ""
+    log "Launching Upgrade module ..."
+    verbose echo "The current application will now terminate and the upgrade will begin."
+    sleep 2
+    exec sh "$upgrade_script"
+    warning "Failed to launch upgrade script!"
+    exit 1
+}
+parse_args() {
+    local cmd=""
+    local verbose=0
+    local help=0
+    for arg in "$@"; do
+        case "$arg" in
+            --help|-h|help|HELP|--HELP)
+                help=1
+                ;;
+            --verbose|-v|VERBOSE)
+                verbose=1
+                ;;
+            -*)
+                help=1
+                ;;
+            *)
+                [ -z "$cmd" ] && cmd="$arg"
+                ;;
+        esac
+    done
+    echo "$help $verbose $cmd"
+}
+_parse=$(parse_args "$@")
+help=$(echo "$_parse" | cut -d' ' -f1)
+verbose=$(echo "$_parse" | cut -d' ' -f2)
+cmd=$(echo "$_parse" | cut -d' ' -f3-)
+[ "$help" = "1" ] && show_usage && exit 0
+[ $# -eq 0 ] && show_header && exit 1
+[ -z "$cmd" ] && show_header && exit 1
+VERBOSE=$verbose
+case "$cmd" in
     list)
-        list_configs
-        ;;
-    list-full)
-        list_configs_full
+        if [ "$VERBOSE" = "1" ]; then
+            list_configs_full
+        else
+            list_configs "$2"
+        fi
         ;;
     setup)
-        if [ "$2" = "--advanced" ]; then
-            advanced_mode=1
-            conf_name="$3"
-        elif [ "$3" = "--advanced" ]; then
-            advanced_mode=1
-            conf_name="$2"
-        elif [ -n "$2" ] && [ "$2" != "--advanced" ]; then
-            conf_name="$2"
-        fi
-        if [ $advanced_mode -eq 1 ]; then
-            setup_wireguard_advanced "$conf_name"
-        elif [ -n "$conf_name" ]; then
-            setup_wireguard "$conf_name"
-        else
-            show_usage
-        fi
+        setup_wireguard "$2"
         ;;
     up)
-        [ -n "$2" ] && activate_interface "$2" || show_usage
+        [ -n "$2" ] && activate_interface "$2" || (show_header && exit 1)
         ;;
     down)
-        [ -n "$2" ] && deactivate_interface "$2" || show_usage
+        [ -n "$2" ] && deactivate_interface "$2" || (show_header && exit 1)
         ;;
     remove)
-        [ -n "$2" ] && remove_wireguard "$2" || show_usage
+        [ -n "$2" ] && remove_wireguard "$2" || (show_header && exit 1)
         ;;
     status)
         show_status "$2"
         ;;
     test)
-        [ -n "$2" ] && test_config "$2" || show_usage
+        [ -n "$2" ] && test_config "$2" || (show_header && exit 1)
         ;;
     clean)
         clean_wireguard_interactive "$2"
         ;;
-    nuke-all)
+    nuke)
         nuke_all
         ;;
     backups)
@@ -1298,10 +1448,14 @@ case "$1" in
                 show_backups
                 ;;
             restore)
-                restore_backups "$3"
+                if [ -n "$3" ] && ! echo "$3" | grep -q "^-"; then
+                    restore_backups "$3"
+                else
+                    restore_backups
+                fi
                 ;;
             *)
-                show_usage
+                show_header && exit 1
                 ;;
         esac
         ;;
@@ -1317,11 +1471,15 @@ case "$1" in
                 show_routes "$3"
                 ;;
             *)
-                show_usage
+                show_header && exit 1
                 ;;
         esac
         ;;
+    upgrade)
+        upgrade_app
+        exit 1
+        ;;
     *)
-        show_usage
+        show_header && exit 1
         ;;
 esac
