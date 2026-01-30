@@ -36,6 +36,12 @@ apk add ./packages/*/wg-autoconf-*.apk
 
 ## Quick Start
 
+### 0. Use Verbosity when needed
+```bash
+# wg-autoconf list --verbose
+# wg-autoconf upgrade -v
+```
+
 ### 1. Place Wireguard config files
 
 - PATH: `/etc/wireguard/*.conf`:
@@ -108,9 +114,24 @@ Or:
 # wg-autoconf nuke-all (removes  & clean ALL ifaces, tables, rules with no confirmation)
 ```
 
+### 8. Upgrade availability
+
+Currently, it supports updating via a local file.  
+**Planned: direct updates from OpenWRT (pending the integration of wg-autoconf into official repositories).**
+
+```bash
+# wg-autoconf upgrade
+# wg-autoconf upgrade --verbose
+```
+
 ---
 
 ## Commands
+
+**Full help & usage: `wg-autoconf --help`**
+
+| Args | Purpose |
+| `--verbose / -v` | Get a high verbosity level on almost any command |
 
 | Command | Purpose |
 |---------|---------|
@@ -134,8 +155,8 @@ Or:
 |||
 | `backups show` | List available backups config files |
 | `backups restore [name]` | Restore backup files |
-
-Full help & usage: `wg-autoconf --help`
+|||
+| `upgrade` | Upgrade `wg-autoconf` safely |
 
 ---
 
