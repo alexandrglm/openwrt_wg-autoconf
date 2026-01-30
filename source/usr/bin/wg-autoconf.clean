@@ -1,4 +1,4 @@
-VERSION="v1.0.0r4"
+VERSION="v1.0.0r5"
 WG_CONF_DIR="/etc/wireguard"
 NETWORK_CONF="/etc/config/network"
 DHCP_CONF="/etc/config/dhcp"
@@ -726,8 +726,8 @@ activate_interface() {
     if ifup "$iface" >/dev/null 2>&1; then
         sleep 1
         success "$iface enabled!"
-        echo ""
-        echo "$iface Info:"
+        verbose echo ""
+        verbose echo "$iface Info:"
         until ip link show "$iface" >/dev/null 2>&1; do
             sleep 0.2
         done
@@ -1150,7 +1150,7 @@ show_routes() {
             echo ""
         done
     fi
-    [ -z "$(grep '_vpn_' /etc/iproute2/rt_tables 2>/dev/null)" ] && echo "No WireGuard routes configured"
+    [ -z "$(grep '_vpn_' /etc/iproute2/rt_tables 2>/dev/null)" ] && warning "No WireGuard routes configured"
 }
 configure_routes() {
     local action="$1"
@@ -1242,16 +1242,26 @@ config forwarding\\
     /etc/init.d/firewall reload 2>/dev/null
     verbose echo ""
     verbose ui_lines 50 "${GREEN}WG ROUTE CONFS${NC}"
-    verbose ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
-    verbose ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
-    echo ""
+    verbose ip rule show | grep -E "(${table_name}|${lan_iface})" || verbose echo "No rules found"
+    verbose echo ""
+    verbose ip route show table "$table_name" 2>/dev/null || verbose echo "$table_name is EMPTY!"
+    verbose echo ""
     success "Wireguard routes already configured!"
 }
 unset_lan_routes() {
     local wg_iface="$1"
     local lan_iface="$2"
     local table_name="${lan_iface}_vpn_${wg_iface}"
-    verbose log "Removing routes for $lan_iface (via $wg_iface)..."
+    log "Removing routes for $lan_iface (via $wg_iface)..."
+    local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
+    local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
+    local cidr
+    if [ -n "$lan_netmask" ]; then
+        cidr=$(netmask_to_cidr "$lan_netmask")
+    else
+        cidr=24
+    fi
+    local subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
     ip route flush table "$table_name" 2>/dev/null
@@ -1283,6 +1293,8 @@ unset_lan_routes() {
             verbose success "Firewall rules removed"
         fi
     fi
+    sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
+    verbose success "Routing table removed from rt_tables"
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
     success "$lan_iface routes (via $wg_iface) successfully removed!"

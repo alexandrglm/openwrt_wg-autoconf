@@ -12,7 +12,7 @@
 # Maintainer: Alexander Gomez <148530039+alexandrglm@users.noreply.github.com>
 # pkgname=wg-autoconf
 # pkgver=1.0.0
-# pkgrel=4
+# pkgrel=5
 # pkgdesc="WireGuard Auto-Configuration tool"
 # url="https://github.com/alexandrglm/openwrt_wg-autoconf"
 # arch="noarch"
@@ -35,7 +35,7 @@
 ######################################################################
 
 
-VERSION="v1.0.0r4"
+VERSION="v1.0.0r5"
 
 WG_CONF_DIR="/etc/wireguard"
 NETWORK_CONF="/etc/config/network"
@@ -1337,8 +1337,8 @@ activate_interface() {
         sleep 1
 
         success "$iface enabled!"
-        echo ""
-        echo "$iface Info:"
+        verbose echo ""
+        verbose echo "$iface Info:"
 
         until ip link show "$iface" >/dev/null 2>&1; do
             sleep 0.2
@@ -2390,7 +2390,7 @@ show_routes() {
     # 3. HANDLE EMPTY STATE WHEN NO ROUTES ARE CONFIGURED
     # -------------------------------------------------------------------
     # CHECK PREOVIOUS VPN TABLES
-    [ -z "$(grep '_vpn_' /etc/iproute2/rt_tables 2>/dev/null)" ] && echo "No WireGuard routes configured"
+    [ -z "$(grep '_vpn_' /etc/iproute2/rt_tables 2>/dev/null)" ] && warning "No WireGuard routes configured"
 }
 
 
@@ -2438,7 +2438,6 @@ show_routes() {
 #   - netmask_to_cidr(): Converts netmask to CIDR notation
 #   - ip_to_network(): Calculates network address from IP and CIDR
 #
-#####################################################################
 #####################################################################
 # WG-AUTOCONF routes set/unset/show
 
@@ -2573,10 +2572,11 @@ config forwarding\\
     # 5.7 RESUME CONFS
     verbose echo ""
     verbose ui_lines 50 "${GREEN}WG ROUTE CONFS${NC}"
-    verbose ip rule show | grep -E "(${table_name}|${lan_iface})" || echo "No rules found"
-    verbose ip route show table "$table_name" 2>/dev/null || echo "$table_name is EMPTY!"
+    verbose ip rule show | grep -E "(${table_name}|${lan_iface})" || verbose echo "No rules found"
+    verbose echo ""
+    verbose ip route show table "$table_name" 2>/dev/null || verbose echo "$table_name is EMPTY!"
+    verbose echo ""
 
-    echo ""
     success "Wireguard routes already configured!"
 }
 
@@ -2609,26 +2609,35 @@ unset_lan_routes() {
     local lan_iface="$2"
     local table_name="${lan_iface}_vpn_${wg_iface}"
 
-    verbose log "Removing routes for $lan_iface (via $wg_iface)..."
+    log "Removing routes for $lan_iface (via $wg_iface)..."
 
-    # 1. CLEAN ROUTING RULES AND ROUTES
+    # 1. CALCULATE PROPERLY FIXs
+    local lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
+    local lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
+    local cidr
+
+    if [ -n "$lan_netmask" ]; then
+        cidr=$(netmask_to_cidr "$lan_netmask")
+    else
+        cidr=24
+    fi
+
+    local subnet="$(ip_to_network "$lan_ip" "$cidr")/$cidr"
+
+    # 2. CLEANing ROUTING RULES AND ROUTES
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
     ip route flush table "$table_name" 2>/dev/null
 
-    # 2. REMOVE FIREWALL FORWARDING RULES (BETTER METHOD)
+    # 3. CLEANING FIREWALL ROULES
     verbose log "Removing firewall forwarding rules..."
 
-    # Find firewall tag ID for wg_iface
     local fw_line=$(grep -n "option name '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
 
     if [ -n "$fw_line" ]; then
         local fw_tag_id=$(sed -n "1,${fw_line}p" "$FIREWALL_CONF" | grep "# wg-autoconf firewall start id" | tail -1 | sed 's/.*id //g')
 
-
-        #
         if [ -n "$fw_tag_id" ]; then
-            # Remove ONLY the forwarding blocks for this specific pair
             awk -v tag_id="$fw_tag_id" -v lan="$lan_iface" -v wg="$wg_iface" '
                 /# wg-autoconf firewall start id/ && $NF == tag_id { in_tag=1; print; next }
                 /# wg-autoconf firewall end id/ && in_tag { in_tag=0; print; next }
@@ -2637,14 +2646,10 @@ unset_lan_routes() {
                     getline; src = $0
                     getline; dest = $0
 
-                    # Check if this is one of our rules to delete
-                    # Pattern: option src 'lan4' / option dest 'wg_us89'
                     if ((src ~ "option src.*" lan && dest ~ "option dest.*" wg) ||
                         (src ~ "option src.*" wg && dest ~ "option dest.*" lan)) {
-                        # Skip this block (delete it) - do nothing
                         next
                     } else {
-                        # Keep it
                         print "config forwarding"
                         print src
                         print dest
@@ -2652,7 +2657,6 @@ unset_lan_routes() {
                     next
                 }
 
-                # Skip completely blank lines unless in tag
                 /^[[:space:]]*$/ && !in_tag { next }
 
                 { print }
@@ -2663,7 +2667,11 @@ unset_lan_routes() {
         fi
     fi
 
-    # 3. COMMIT
+    # 4. CLEANING rt_tables (but fixed from rel4)
+    sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
+    verbose success "Routing table removed from rt_tables"
+
+    # D0ne
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
 
