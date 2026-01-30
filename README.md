@@ -7,7 +7,7 @@ Automated WireGuard configuration tool for OpenWrt, making easy the interface se
 ## Installation
 
 > [!WARNING]
-> **wg-autoconf uses the new APK package format** (Alpine Linux). Supported on OpenWrt 23.05+ with APK enabled. At the time no Opkg is offered for older systems (but planned).
+> **wg-autoconf uses the new APK package format** (Alpine Linux). Supported on OpenWrt 24.12+ with APK enabled. At the time no Opkg is offered for older systems (but planned).
 
 
 ### From Release (Recommended)
