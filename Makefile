@@ -50,32 +50,32 @@ define Package/wg-autoconf/install
 		$(1)/usr/bin/wg-autoconf
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wg-autoconf_boot_cleanup.source \
-		$(1)/etc/init.d/wg-autoconfig_boot_cleanup
+		$(1)/etc/init.d/wg-autoconf_boot_cleanup
 	$(INSTALL_DIR) $(1)/usr/libexec/wg-autoconf/scripts
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wg-autoconf_prerm.source \
-		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconfig_prerm.sh
+		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wg-autoconf_preinst.source \
-		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconfig_preinst.sh
+		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wg_autoconf_postinst.source \
-		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconfig_postinst.sh
+		$(1)/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh
 endef
 
 
 define Package/wg-autoconf/preinst
 #!/bin/sh
-/usr/libexec/wg-autoconf/scripts/wg-autoconfig_preinst.sh
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh
 exit 0
 endef
 
 define Package/wg-autoconf/postinst
 #!/bin/sh
-/usr/libexec/wg-autoconf/scripts/wg-autoconfig_postinst.sh
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh
 exit 0
 endef
 
 define Package/wg-autoconf/prerm
 #!/bin/sh
-/usr/libexec/wg-autoconf/scripts/wg-autoconfig_postinst.sh
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh
 exit 0
 endef
 

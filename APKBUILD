@@ -22,10 +22,10 @@ build() {
 
 package() {
 	install -Dm755 "$builddir/usr/bin/wg-autoconf.clean" "$pkgdir/usr/bin/wg-autoconf"
-	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.source" "$pkgdir/etc/init.d/wg-autoconfig_boot_cleanup"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconfig_prerm.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconfig_preinst.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg_autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconfig_postinst.sh"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.source" "$pkgdir/etc/init.d/wg-autoconf_boot_cleanup"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg_autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
 }
 
 pre_install() {
