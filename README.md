@@ -131,6 +131,7 @@ Currently, it supports updating via a local file.
 **Full help & usage: `wg-autoconf --help`**
 
 | Args | Purpose |
+|------|---------|
 | `--verbose / -v` | Get a high verbosity level on almost any command |
 
 | Command | Purpose |
