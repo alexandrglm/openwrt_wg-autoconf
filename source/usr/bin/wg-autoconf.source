@@ -12,7 +12,7 @@
 # Maintainer: Alexander Gomez <148530039+alexandrglm@users.noreply.github.com>
 # pkgname=wg-autoconf
 # pkgver=1.0.0
-# pkgrel=6
+# pkgrel=5
 # pkgdesc="WireGuard Auto-Configuration tool"
 # url="https://github.com/alexandrglm/openwrt_wg-autoconf"
 # arch="noarch"
@@ -422,9 +422,6 @@ show_usage() {
 #####################################################################
 # 1   LIST
 list_configs() {
-# 1. Primero, caso list con args (conf file)
-# 2. Si no, modo list normal
-
 
     local file_arg="$1"
 
@@ -619,8 +616,11 @@ setup_network_config() {
     local tag_id=$(get_next_tag_id "$NETWORK_CONF" "network")
 
     if grep -q "# wg-autoconf network start id $tag_id" "$NETWORK_CONF" 2>/dev/null; then
+
         warning "NETWORK tag with id $tag_id already exists. Skipping..."
+        debug_write "[ERROR setup/up] Attempt to overwrite $tag_id for $iface_name in /etc/config/NETWORK"
         return 0
+
     fi
 
     # 3. FIX PROCESS ALLOWED IPS (split by comma or space)
@@ -651,6 +651,7 @@ EOF
 EOF
 
     verbose success "Added NETWORK config for $iface_name (id: $tag_id)"
+    # debug_write "[OK] Added $iface_name in /etc/config/NETWORK"
 }
 
 #####################################################################
@@ -664,8 +665,11 @@ setup_dhcp_config() {
     local tag_id=$(get_next_tag_id "$DHCP_CONF" "dhcp")
 
     if grep -q "# wg-autoconf dhcp start id $tag_id" "$DHCP_CONF" 2>/dev/null; then
+
         warning "DHCP tag with id $tag_id already exists. Skipping..."
+        debug_write "[ERROR setup/up] Attempt to overwrite $tag_id for $iface_name in /etc/config/DHCP"
         return 0
+
     fi
 
     cat >> "$DHCP_CONF" << EOF
@@ -677,6 +681,7 @@ config dhcp '$iface_name'
 EOF
 
     verbose success "Added DHCP config for $iface_name (id: $tag_id)"
+    # debug_write "[OK] Added $iface_name in /etc/config/NETWORK"
 }
 
 #####################################################################
@@ -691,7 +696,9 @@ setup_firewall_config() {
     local tag_id=$(get_next_tag_id "$FIREWALL_CONF" "firewall")
 
     if grep -q "# wg-autoconf firewall start id $tag_id" "$FIREWALL_CONF" 2>/dev/null; then
+
         warning "Firewall tag with id $tag_id already exists. Skipping..."
+        debug_write "[ERROR setup/up] Attempt to overwrite $tag_id for $iface_name in /etc/config/FIREWALL"
         return 0
     fi
 
@@ -805,6 +812,7 @@ setup_wireguard() {
     if iface_exists "$iface_name"; then
 
         warning "$iface_name already exists! Use --advanced mode!"
+        debug_write "[ERROR setup auto] Attempt to overwrite for $iface_name"
         log "WG-AUTOCONF setup CANCELLED!"
         exit 0
     fi
@@ -813,6 +821,7 @@ setup_wireguard() {
     local collision=$(address_exists "$address")
     if [ -n "$collision" ]; then
         error "Address $address already in use by $collision! Use --advanced mode to set it up with another interface name"
+        debug_write "[ERROR setup auto] IP collision: $address for  $iface_name"
     fi
 
 
@@ -832,8 +841,10 @@ setup_wireguard() {
         allowed_ips=$(process_allowed_ips "$allowed_ips_raw" | tr '\n' ' ')
 
     else
+
         # Default to full tunnel if no AllowedIPs specified
         allowed_ips="0.0.0.0/0"
+
     fi
 
     # -------------------------------------------------------------------
@@ -954,7 +965,9 @@ setup_wireguard_advanced() {
 
         # Check for existing interface with same name
         if iface_exists "$iface_name"; then
+
             warning "Interface $iface_name already exists!"
+            debug_write "[ERROR setup --advanced] Attempt to overwrite existing $iface_name"
             read -p "Try another name? (y/N): " retry
             case "$retry" in
                 y|Y) continue ;;
@@ -1058,6 +1071,7 @@ setup_wireguard_advanced() {
         if [ -n "$collision" ]; then
 
             warning "Address $address already in use by $collision!"
+            debug_write "[ERROR setup --advanced] Collision IP $address for $iface_name"
             read -p "Try another address? (y/N): " retry
 
             case "$retry" in
@@ -1237,7 +1251,7 @@ setup_wireguard_advanced() {
     uci commit firewall
 
     # -------------------------------------------------------------------
-    # 12. IPV6 LEAK PREVENTION
+    # 12. IPV6 LEAK PREVENTION FIX
     # -------------------------------------------------------------------
     configure_dns_ipv6_filter
 
@@ -1394,7 +1408,12 @@ activate_interface() {
         verbose echo ""
         verbose sh -c logread | verbose tail -10
         verbose echo ""
+        debug_write "[ERROR up] Cannot enable $iface"
+        debug wg show "$iface"
+        debug ip link show "$iface"
+        debug logread | tail -10
         error "Errors found enabling $iface. Check logread"
+
 
     fi
 }
@@ -1415,7 +1434,17 @@ deactivate_interface() {
 
     log "Disabling $iface..."
 
-    ifdown "$iface" >/dev/null 2>&1 && success "$iface disabled!" || error "$iface was NOT disabled! Check logs!"
+    if ifdown "$iface" >/dev/null 2>&1; then
+
+        success "$iface disabled!"
+    else
+
+        debug_write "[ERROR down] Cannot disable $iface. Does it exist?"
+        debug logread | tail -20
+        debug ip link show "$iface"
+        error "$iface was NOT disabled! Check logs!"
+
+    fi
 }
 
 #####################################################################
@@ -1535,7 +1564,7 @@ remove_wireguard() {
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
 
-
+    debug_write "[OK] $iface removed"
     [ "$silent" != "silent" ] && success "$iface removed!"
 }
 
@@ -1803,6 +1832,7 @@ cleanup_backup_files() {
 
     rm -f /etc/config/*.BACKUP_PRE_WIREGUARD 2>/dev/null
 
+    debug_write "[BACKUPS] All backups were removed!"
     verbose success "Backup files cleaned"
 }
 
@@ -1897,6 +1927,7 @@ clean_wireguard_interactive() {
                 local address=$(uci get "network.$iface.addresses" 2>/dev/null || echo "N/A")
                 local endpoint=$(uci get "network.${iface}_peer.endpoint_host" 2>/dev/null || echo "N/A")
 
+                debug_write "[CLEANUP] $iface removal petition"
                 echo ""
                 echo "Will remove:"
                 echo ""
@@ -1914,6 +1945,7 @@ clean_wireguard_interactive() {
                     y|Y|yes|YES|Yes)
                         remove_wireguard "$iface"
                         cleanup_wireguard_routes
+                        debug_write "[CLEANUP] $iface cleaned!"
                         success "$iface cleaned!"
                         ;;
                     *)
@@ -1979,6 +2011,7 @@ cleanup_wireguard_routes() {
     for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z-]*" | sort -u); do
 
         ip link delete "$iface" 2>/dev/null
+        debug_write "[ROUTES UNSET] Deleted interface: $iface"
         success "Deleted interface: $iface"
 
     done
@@ -1990,11 +2023,14 @@ cleanup_wireguard_routes() {
     if [ -f /etc/iproute2/rt_tables ]; then
 
         # MATCH AND REMOVE "_vpn_"
+        debug_write "[ROUTES UNSET] TABLES:"
+        debug cat /etc/iproute2/rt_tables
         grep -v "_vpn_" /etc/iproute2/rt_tables > /tmp/rt_tables.tmp 2>/dev/null
 
         # Replace original file with filtered version
         mv /tmp/rt_tables.tmp /etc/iproute2/rt_tables
 
+        debug_write "[ROUTES UNSET] VPN routing tables removed"
         verbose success "VPN routing tables removed!"
     fi
 
@@ -2005,8 +2041,6 @@ cleanup_wireguard_routes() {
     ip rule show 2>/dev/null | grep "_vpn_" | while read -r line; do
 
         # EEXTRACT PRIORITY ID
-
-
 
         # DEBUG! rel5
         # TODO: test in older devices
@@ -2021,6 +2055,7 @@ cleanup_wireguard_routes() {
         [ -n "$rule_num" ] && ip rule del prio "$rule_num" 2>/dev/null
     done
 
+    debug_write "[ROUTES UNSET] Firewall Rules REmoved"
     verbose success "WireGuard routing rules flushed!"
 }
 
@@ -2158,10 +2193,12 @@ cleanup_config_files() {
                     fi
                 done
 
-                # COMMIT LIGHT
+                # COMMIT HARD
                 uci commit network 2>/dev/null
                 uci commit dhcp 2>/dev/null
                 uci commit firewall 2>/dev/null
+                /etc/init.d/firewall reload 2>/dev/nullS
+
 
                 success "Backups restored and committed"
                 cleanup_backup_files
@@ -2198,7 +2235,9 @@ cleanup_config_files() {
 #
 #####################################################################
 nuke_all() {
+
     log "NUKE CLEANUP MODE - Removing ALL WireGuard configurations without asking"
+    debug_write "[NUKE] Nuke petition STARTED ..."
     echo ""
 
     # -------------------------------------------------------------------
@@ -2214,6 +2253,7 @@ nuke_all() {
 
             # IFDOWN
             ifdown "$iface" 2>/dev/null
+            debug_write "[NUKE] $iface DOWN"
             verbose success "Downed: $iface"
 
         done
@@ -2224,6 +2264,7 @@ nuke_all() {
     # 2. REMOVAL OF ALL TAGGED CONFIGURATION BLOCKS
     # -------------------------------------------------------------------
     verbose log "Removing configuration blocks..."
+    debug_write "[NUKE] Tags/Untag logic petition STARTS"
 
     # FIND-EXTRACT TAG-ID
     local all_network_ids=$(grep "# wg-autoconf network start id" "$NETWORK_CONF" 2>/dev/null | sed 's/.*id //g')
@@ -2248,12 +2289,14 @@ nuke_all() {
     done
 
     # -------------------------------------------------------------------
-    # 3. UCI CONFIGURATION LIGHT COMMIT
+    # 3. UCI CONFIGURATION HARD
     # -------------------------------------------------------------------
     uci commit network 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
+    /etc/init.d/firewall 2>/dev/null
 
+    debug_write "[NUKE] Tags/Untag logic petition FINISHED OK"
     verbose success "Configuration files cleaned"
     verbose echo ""
 
@@ -2262,6 +2305,7 @@ nuke_all() {
     # -------------------------------------------------------------------
     verbose log "Cleaning routing tables and rules..."
 
+    debug_write "[NUKE] Next ROUTE disabling petition, made by nuke"
     cleanup_wireguard_routes
 
     verbose echo ""
@@ -2291,12 +2335,14 @@ nuke_all() {
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
 
+    debug_write "[NUKE] Backups restored, removed and comitted"
     verbose success "Backups restored and committed"
     verbose echo ""
 
     cleanup_backup_files
 
     verbose echo ""
+    debug_write "[NUKE] Nuke petition FINISHED OK"
     success "NUKE COMPLETED - System ready for new setup!"
 }
 
@@ -2362,6 +2408,7 @@ nuke_all() {
 #
 #####################################################################
 show_routes() {
+
     local filter_wg_iface="$1"
 
     log "WireGuard routes:"
@@ -2501,37 +2548,21 @@ show_routes() {
 #####################################################################
 # WG-AUTOCONF routes set/unset/show
 
-configure_routes() {
-
-    local action="$1"
-    local wg_iface="$2"
-    local lan_iface="$3"
-
-    case "$action" in
-        set)
-            [ -z "$wg_iface" ] || [ -z "$lan_iface" ] && error "Usage: wg-autoconf routes set <wg_iface> <lan_iface>"
-            set_lan_routes "$wg_iface" "$lan_iface"
-            ;;
-        unset)
-            [ -z "$wg_iface" ] || [ -z "$lan_iface" ] && error "Usage: wg-autoconf routes unset <wg_iface> <lan_iface>"
-            unset_lan_routes "$wg_iface" "$lan_iface"
-            ;;
-        *)
-            error "Usage: wg-autoconf routes set|unset|show [wg_iface]"
-            ;;
-    esac
-}
 set_lan_routes() {
+
     local wg_iface="$1"
     local lan_iface="$2"
+    debug_write "[ROUTES SET] Started ..."
 
     # 1. VERIFY WG IFACE EXISTS
     if ! iface_exists "$wg_iface"; then
+    debug_write "[ROUTES set] Attemp to set non-existent $wg_iface ERROR"
         error "$wg_iface interface NOT FOUND at /etc/config/network"
     fi
 
     # 2. VERIFY LAN IFACE EXISTS
     if ! iface_exists "$lan_iface"; then
+        debug_write "[ROUTES set] Attemp to set non-existent $wg_iface to $lan_iface ERROR"
         error "$lan_iface interface NOT FOUND at /etc/config/network"
     fi
 
@@ -2549,6 +2580,7 @@ set_lan_routes() {
         cidr=$(netmask_to_cidr "$lan_netmask")
     else
         cidr=24
+        debug_write "[ROUTES SET] NETMASK /24 pre-assumed, check .conf!"
         warning "$lan_iface netmask not found, assuming /24"
     fi
 
@@ -2578,10 +2610,13 @@ set_lan_routes() {
     # 5.5 default Route to WireGuard interface
     if ip link show "$wg_iface" >/dev/null 2>&1; then
         ip route add default dev "$wg_iface" table "$table_name"
+        debug_write "[ROUTES SET] New routes created: $wg_iface via $lan_iface, MASK $subnet"
+        debug_write "$table_name"
         verbose success "Route conf done!: $lan_iface through $wg_iface"
         verbose echo "   ANY device from $subnet will use WireGuard ($wg_iface)"
     else
         warning "$wg_iface does NOT exist yet!"
+        debug_write "[ROUTES SET] Logic error, or tampered bins:  $wg_iface does NOT exist yet so that cannot activate $lan_iface!"
         echo "   $lan_iface WONT work unless $wg_iface is active!"
         echo "   To activate: wg-autoconf up $wg_iface"
     fi
@@ -2616,6 +2651,7 @@ config forwarding\\
 
                 verbose success "Firewall forwarding rules added"
             else
+                debug_write "[ROUTES SET FW ERROR] Attempt to create existing rules. Tampered bins?"
                 warning "Forwarding rules already exist for $lan_iface <--> $wg_iface"
             fi
         else
@@ -2637,6 +2673,7 @@ config forwarding\\
     verbose ip route show table "$table_name" 2>/dev/null || verbose echo "$table_name is EMPTY!"
     verbose echo ""
 
+    debug_write "[ROUTES SET] Ended OK!"
     success "Wireguard routes already configured!"
 }
 
@@ -2665,10 +2702,13 @@ config forwarding\\
 #
 #####################################################################
 unset_lan_routes() {
+
+
     local wg_iface="$1"
     local lan_iface="$2"
     local table_name="${lan_iface}_vpn_${wg_iface}"
 
+    debug_write "[ROUTES UNSET] Started ..."
     log "Removing routes for $lan_iface (via $wg_iface)..."
 
     # 1. CALCULATE PROPERLY FIXs
@@ -2679,6 +2719,7 @@ unset_lan_routes() {
     if [ -n "$lan_netmask" ]; then
         cidr=$(netmask_to_cidr "$lan_netmask")
     else
+        debug_write "[ROUTES UNSET] Pre-assuming NETMASK/24. Check confs"
         cidr=24
     fi
 
@@ -2730,18 +2771,21 @@ unset_lan_routes() {
             ' "$FIREWALL_CONF" | sed '/^[[:space:]]*$/N;/^\n$/!P;D' > "$FIREWALL_CONF.tmp"
 
             mv "$FIREWALL_CONF.tmp" "$FIREWALL_CONF"
+            debug_write "[ROUTES UNSET] Firewall rules removed OK"
             verbose success "Firewall rules removed"
         fi
     fi
 
     # 4. CLEANING rt_tables (but fixed from rel4)
     sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
+    debug_write "[ROUTES UNSET] Routing tables removed OK"
     verbose success "Routing table removed from rt_tables"
 
     # D0ne
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
 
+    debug_write "[ROUTES UNSET] Ended OK"
     success "$lan_iface routes (via $wg_iface) successfully removed!"
 }
 
@@ -2922,7 +2966,7 @@ upgrade_app() {
     #       Directly remove upgrade_app function!!!!
     exec sh "$upgrade_script"
 
-
+    debug_write "[UPGRADE] Temporary update script FAILED! Check exec sh $upgrade_script availability, permissions, or changes on ASH"
     warning "Failed to launch upgrade script!"
     exit 1
 }
