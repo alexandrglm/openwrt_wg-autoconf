@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+# wg-autoconf_boot_cleanup for 1.0.0-rel5
+START=93
+
+start() {
+
+    echo "[INIT.D/wg-autoconf_boot_cleanup] START()" > /dev/kmsg
+
+    if /usr/bin/wg-autoconf nuke 2>/dev/null; then
+
+        echo "[INIT.D/wg-autoconf_boot_cleanup] NUKE completed successfully" > /dev/kmsg
+        return 0
+    fi
+
+    echo "[INIT.D/wg-autoconf_boot_cleanup] NUKE failed, using fallback cleanup" > /dev/kmsg
+
+    for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z_-]*" | sort -u); do
+
+        ip link delete "$iface" 2>/dev/null
+
+    done
+
+    uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | \
+        cut -d. -f2 | cut -d= -f1 | while read -r iface; do
+        uci delete "network.$iface" 2>/dev/null
+        uci delete "network.${iface}_peer" 2>/dev/null
+    done
+
+
+    for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
+        [ -f "$backup" ] || continue
+        original="${backup%.BACKUP_PRE_WIREGUARD}"
+        cp "$backup" "$original" 2>/dev/null
+        rm -rf "$backup" 2>/dev/null
+        uci commit network 2>/dev/null
+        uci commit dhcp 2>/dev/null
+        uci commit firewall 2>/dev/null
+        sleep 1
+        /etc/init.d/firewall reload 2>/dev/null
+
+    echo "[INIT.D/wg-autoconf_boot_cleanup] Fallback cleanup completed" > /dev/kmsg
+    done
+
+
+}
+
+stop() {
+    :
+}
+
+restart() {
+    start
+}

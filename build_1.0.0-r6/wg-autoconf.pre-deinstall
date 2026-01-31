@@ -1,0 +1,2 @@
+#!/bin/ash
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh
