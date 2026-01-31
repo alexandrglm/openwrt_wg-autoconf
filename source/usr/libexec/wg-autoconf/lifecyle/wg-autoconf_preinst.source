@@ -1,5 +1,5 @@
 #!/bin/ash
-# rel5 pre_intall() lifecycle method
+# rel6 pre_intall() lifecycle method
 if [ -f "/usr/bin/wg-autoconf" ]; then
 
 	if ip link show 2>/dev/null | grep -qE '^ *[0-9]+: wg[a-zA-Z0-9_-]+'; then

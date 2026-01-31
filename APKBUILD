@@ -1,7 +1,7 @@
 # Maintainer: Alexander Gomez <alexandrglm@proton.me>
 pkgname=wg-autoconf
 pkgver=1.0.0
-pkgrel=5
+pkgrel=6
 pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
 url="https://github.com/alexandrglm/openwrt_wg-autoconf"
 arch="noarch"
