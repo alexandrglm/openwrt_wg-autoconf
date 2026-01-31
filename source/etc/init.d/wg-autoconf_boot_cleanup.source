@@ -1,5 +1,5 @@
 #!/bin/sh /etc/rc.common
-# wg-autoconf_boot_cleanup for 1.0.0-rel5
+# wg-autoconf_boot_cleanup for 1.0.0-rel6
 START=93
 
 start() {

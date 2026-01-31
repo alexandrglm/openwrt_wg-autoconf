@@ -1,5 +1,5 @@
 #!/bin/ash
-# rel5 pre_deinstall() lifecycle method
+# rel6 pre_deinstall() lifecycle method
 if /usr/bin/wg-autoconf nuke 2>/dev/null; then
 
     echo "[INIT.D/wg-autoconf_boot_cleanup] pre_deinstall() NUKE d0ne!" > /dev/kmsg
