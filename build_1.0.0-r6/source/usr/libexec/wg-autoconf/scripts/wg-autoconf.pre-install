@@ -1,0 +1,2 @@
+#!/bin/ash
+wg-autoconf_preinst.source

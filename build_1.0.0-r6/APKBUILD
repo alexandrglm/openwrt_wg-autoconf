@@ -1,0 +1,33 @@
+# Maintainer: Alexander Gomez <alexandrglm@proton.me>
+pkgname=wg-autoconf
+pkgver=1.0.0
+pkgrel=6
+pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
+url="https://github.com/alexandrglm/openwrt_wg-autoconf"
+arch="noarch"
+license="MIT"
+depends="wireguard-tools"
+makedepends=""
+options="!check !strip !scanelf"
+source="source.tar.gz"
+install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall"
+
+prepare() {
+	mkdir -p "$builddir"
+	cp -r "$startdir/source"/* "$builddir/" 2>/dev/null || true
+}
+
+build() {
+	return 0
+}
+
+package() {
+	install -Dm755 "$builddir/usr/bin/wg-autoconf.clean" "$pkgdir/usr/bin/wg-autoconf"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.source" "$pkgdir/etc/init.d/wg-autoconf_boot_cleanup"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
+}
+sha512sums="
+2612c525426e67b0826774e76c743be1a4b32d7055d6a5ba4583ac35ef3acb9e463fca9c4dd49c2ac4721c0c1e9cac5a02b940ed6e252c55a63f56663a020d40  source.tar.gz
+"

@@ -1,0 +1,10 @@
+#!/bin/ash
+# rel6 pre_intall() lifecycle method
+
+if [ -f "/usr/bin/wg-autoconf" ]; then
+	if ip link show 2>/dev/null | grep -qE '^ *[0-9]+: wg[a-zA-Z0-9_-]+'; then
+		echo "[UPGRADE wg-autoconf] ACTIVE WG SESSION!!!!! Aborting upgrade. Use 'wg-autoconf upgrade --verbose' or disconnect the wg session in use." > /dev/kmsg
+		exit 1
+	fi
+fi
+exit 0
