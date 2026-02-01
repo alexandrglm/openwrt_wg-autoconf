@@ -55,7 +55,7 @@ else
         fi
         
         # THEN, AGAIN, VERIFY BUT NATIVE CONTENT SUMS
-        stored_sum=$(tail -1 "$backup" | awk '{print $4}')
+        stored_sum=$(tail -1 "$backup" | grep -o '[0-9a-f]\{64\}' | head -1)
         computed_sum=$(sed '1d; $d' "$backup" | sha256sum | cut -d' ' -f1)
         
         if [ "$stored_sum" != "$computed_sum" ]; then

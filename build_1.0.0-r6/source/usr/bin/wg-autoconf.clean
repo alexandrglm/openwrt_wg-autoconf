@@ -457,8 +457,8 @@ setup_wireguard() {
     uci commit dhcp
     uci commit firewall
     configure_dns_ipv6_filter
-    echo ""
-    success "D0ne!"
+    verbose echo ""
+    verbose success "D0ne!"
     echo ""
     ui_lines 65 "${GREEN}WireGuard CONFIG${NC}"
     echo -e "${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
@@ -843,23 +843,31 @@ backup_config_file() {
     local file="$1"
     local backup_file="${file}.BACKUP_PRE_WIREGUARD"
     [ -f "$backup_file" ] && return 0
+    local checksum=$(cat "$file" | sha256sum | cut -d' ' -f1)
     local tag="# WG_AUTOCONF_BACKUP_v1.0.0-r6_$(date +%s)"
     {
         echo "$tag"
         cat "$file"
-    } > "$backup_file" 2>/dev/null || error "Failed to backup $file" && debug_write "[BACKUP] Failed to Failed to backup $file; check tampered bin? check entire backup logic?"
-    local checksum=$(tail -n +2 "$backup_file" | sha256sum | cut -d' ' -f1)
+    } > "$backup_file" 2>/dev/null || {
+        debug_write "[BACKUP] Failed to backup $file"
+        error "Failed to backup $file"
+    }
     echo "# WG_AUTOCONF_CHECKSUM: $checksum" >> "$backup_file"
     verbose success "Backed up $file -> $backup_file"
 }
 validate_backup() {
     local backup_file="$1"
+    echo "DEBUG_VALIDATE: Validating $backup_file" >&2
     if ! head -1 "$backup_file" | grep -q "WG_AUTOCONF_BACKUP"; then
         return 1
     fi
-    local stored_sum=$(tail -1 "$backup_file" | awk '{print $4}')
+    local stored_sum=$(tail -1 "$backup_file" | grep -o '[0-9a-f]\{64\}' | head -1)
     local computed_sum=$(sed '1d; $d' "$backup_file" | sha256sum | cut -d' ' -f1)
-    [ "$stored_sum" = "$computed_sum" ] && return 0 || return 1
+    if [ "$stored_sum" = "$computed_sum" ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 show_backups() {
     log "Available backup files:"
@@ -1120,7 +1128,7 @@ cleanup_config_files() {
                         continue
                     fi
                     if ! validate_backup "$backup_file"; then
-                        warning "Backup corrupted: $config_name"
+                        warning "Backup corrupted file: $config_name"
                         echo "   File: $backup_file"
                         corruption_found=1
                         continue
@@ -1150,10 +1158,10 @@ cleanup_config_files() {
 nuke_all() {
     log "NUKE CLEANUP MODE - Removing ALL WireGuard configurations without asking"
     debug_write "[NUKE] Nuke petition STARTED ..."
-    echo ""
+    verbose echo ""
     local interfaces=$(get_all_wg_interfaces)
     if [ -n "$interfaces" ]; then
-        log "Taking down all WireGuard interfaces..."
+        verbose log "Taking down all WireGuard interfaces..."
         for iface in $interfaces; do
             ifdown "$iface" 2>/dev/null
             debug_write "[NUKE] $iface DOWN"
@@ -1189,7 +1197,7 @@ nuke_all() {
     cleanup_wireguard_routes
     verbose echo ""
     verbose log "Restoring from backups..."
-    echo ""
+    verbose echo ""
     local restore_count=0
     local corruption_found=0
     for path in $BACKUP_PATHS; do
@@ -1204,19 +1212,23 @@ nuke_all() {
             corruption_found=1
             continue
         fi
-        sed '1d; $d' "$backup_file" > "$path" 2>/dev/null || error "Failed to restore $path" && debug_write "[BACKUP]"
-        success "Restored $config_name"
-        restore_count=$((restore_count + 1))
+        if sed '1d; $d' "$backup_file" > "$path" 2>/dev/null; then
+            verbose success "Restored $config_name"
+            restore_count=$((restore_count + 1))
+            debug_write "[NUKE] Backup restored: $config_name"
+        else
+            error "Failed to restore $path"
+            debug_write "[NUKE] Backup restoration failed! File: $config_name | $path"
+        fi        
     done
-    echo ""
+    verbose echo ""
     if [ $corruption_found -eq 1 ]; then
-        error "Some backups are corrupted. Manual review required!"
-        return 1
+        warning "Some backups are corrupted. Manual review required!"
     fi
     if [ $restore_count -eq 0 ]; then
-        warning "No backups to restore"
+        verbose log "No backups to restore"
     else
-        success "$restore_count file(s) restored successfully"
+        verbose success "$restore_count file(s) restored successfully"
         uci commit network 2>/dev/null
         uci commit dhcp 2>/dev/null
         uci commit firewall 2>/dev/null
@@ -1560,7 +1572,7 @@ debug_init_log() {
         cat > "$DEBUG_LOG" << EOF
 ===[ wg-autoconf $VERSION DEBUG LOG ]=======================
 Started: $(date '+%Y-%m-%d %H:%M:%S')
-============================================================
+=============================================================
 EOF
     fi
 }
@@ -1581,6 +1593,7 @@ debug_is_active() {
 }
 debug_write() {
     local msg="$1"
+    debug_is_active || return 0
     [ -z "$msg" ] && return
     if [ ! -f "$DEBUG_LOG" ]; then
         debug_init_log
@@ -1759,44 +1772,65 @@ debug_handler() {
     esac
 }
 verbose=0
-debug=0
-debug_file=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --verbose|-v)
-            verbose=1
-            shift
-            ;;
-        --debug|-d)
-            debug=1
-            debug_file="$2"
-            [ -n "$debug_file" ] && ! echo "$debug_file" | grep -q "^-" && shift
-            shift
-            ;;
+cmd=""
+if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
+    verbose=1
+    shift
+fi
+if [ $# -gt 0 ]; then
+    last_arg=""
+    for arg in "$@"; do
+        last_arg="$arg"
+    done
+    if [ "$last_arg" = "--verbose" ] || [ "$last_arg" = "-v" ]; then
+        verbose=1
+        new_args=""
+        first=1
+        for arg in "$@"; do
+            if [ "$arg" = "$last_arg" ]; then
+                continue
+            fi
+            if [ $first -eq 1 ]; then
+                new_args="$arg"
+                first=0
+            else
+                new_args="$new_args $arg"
+            fi
+        done
+        set -- $new_args
+    fi
+fi
+cmd_found=0
+cmd_args=""
+for arg in "$@"; do
+    case "$arg" in
         --help|-h|help)
             show_usage
             exit 0
             ;;
         -*)
-            echo "Unknown option: $1"
+            echo "Unknown option: $arg"
             show_header
             exit 1
             ;;
         *)
-            break
+            if [ $cmd_found -eq 0 ]; then
+                cmd="$arg"
+                cmd_found=1
+            else
+                cmd_args="$cmd_args $arg"
+            fi
             ;;
     esac
 done
 VERBOSE=$verbose
-if [ "$debug" = "1" ]; then
-    handle_debug "$debug_file"
-    exit 0
-fi
-cmd="$1"
 if [ -z "$cmd" ]; then
     show_header
     exit 0
 fi
+arg1=$(echo "$cmd_args" | awk '{print $1}')
+arg2=$(echo "$cmd_args" | awk '{print $2}')
+arg3=$(echo "$cmd_args" | awk '{print $3}')
 case "$cmd" in
     list)
         list_configs
@@ -1805,63 +1839,63 @@ case "$cmd" in
         list_configs_full
         ;;
     test)
-        if [ -n "$2" ]; then
-            test_config "$2"
+        if [ -n "$arg1" ]; then
+            test_config "$arg1"
         else
             show_header
             exit 1
         fi
         ;;
     setup)
-        if [ "$2" = "--advanced" ]; then
-            setup_wireguard_advanced "$3"
-        elif [ -n "$2" ]; then
-            setup_wireguard "$2"
+        if [ "$arg1" = "--advanced" ]; then
+            setup_wireguard_advanced "$arg2"
+        elif [ -n "$arg1" ]; then
+            setup_wireguard "$arg1"
         else
             show_header
             exit 1
         fi
         ;;
     up)
-        if [ -n "$2" ]; then
-            activate_interface "$2"
+        if [ -n "$arg1" ]; then
+            activate_interface "$arg1"
         else
             show_header
             exit 1
         fi
         ;;
     down)
-        if [ -n "$2" ]; then
-            deactivate_interface "$2"
+        if [ -n "$arg1" ]; then
+            deactivate_interface "$arg1"
         else
             show_header
             exit 1
         fi
         ;;
     remove)
-        if [ -n "$2" ]; then
-            remove_wireguard "$2"
+        if [ -n "$arg1" ]; then
+            remove_wireguard "$arg1"
         else
             show_header
             exit 1
         fi
         ;;
     status)
-        show_status "$2"
+        show_status "$arg1"
         ;;
     clean)
-        clean_wireguard_interactive "$2"
+        clean_wireguard_interactive "$arg1"
         ;;
     nuke)
         nuke_all
         ;;
     backups)
-        case "$2" in
+        case "$arg1" in
             show)
                 show_backups
                 ;;
             restore)
-                restore_backups "$3"
+                restore_backups "$arg2"
                 ;;
             *)
                 show_header
@@ -1870,25 +1904,25 @@ case "$cmd" in
         esac
         ;;
     routes)
-        case "$2" in
+        case "$arg1" in
             set)
-                if [ -n "$3" ] && [ -n "$4" ]; then
-                    set_lan_routes "$3" "$4"
+                if [ -n "$arg2" ] && [ -n "$arg3" ]; then
+                    set_lan_routes "$arg2" "$arg3"
                 else
                     show_header
                     exit 1
                 fi
                 ;;
             unset)
-                if [ -n "$3" ] && [ -n "$4" ]; then
-                    unset_lan_routes "$3" "$4"
+                if [ -n "$arg2" ] && [ -n "$arg3" ]; then
+                    unset_lan_routes "$arg2" "$arg3"
                 else
                     show_header
                     exit 1
                 fi
                 ;;
             show)
-                show_routes "$3"
+                show_routes "$arg2"
                 ;;
             *)
                 show_header
@@ -1897,7 +1931,7 @@ case "$cmd" in
         esac
         ;;
     debug)
-        debug_handler "$2"
+        debug_handler "$arg1"
         ;;
     upgrade)
         upgrade_app
