@@ -1,0 +1,4 @@
+**/packages
+**/abuild-docker.conf
+**/build_con_docker_abuild.sh
+**/source.tar.gz
