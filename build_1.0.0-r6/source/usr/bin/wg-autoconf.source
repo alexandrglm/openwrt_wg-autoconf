@@ -3156,20 +3156,21 @@ debug_is_active() {
 }
 
 debug_write() {
-
     local msg="$1"
+    
+    # SOLO si debug está activo O si es un error crítico
+    debug_is_active || return 0
+    
     [ -z "$msg" ] && return
-
-
-    # 1.1 VERIFY INIT
+    
+    # Verificar que el log esté inicializado
     if [ ! -f "$DEBUG_LOG" ]; then
         debug_init_log
     fi
-
-    # 1.2 WRITE & ALWAYS CHECK MAX SIZES
+    
+    # Escribir al log
     if [ -f "$DEBUG_LOG" ]; then
         printf "[%s] [%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$VERSION" "$msg" >> "$DEBUG_LOG"
-
         debug_rotate_logs_by_size
     fi
 }
@@ -3177,33 +3178,33 @@ debug_write() {
 debug() {
 
     debug_is_active || return 0
-
+    
     local cmd="$@"
     debug_write "EXEC: $cmd"
-
+    
     local output
     output=$(sh -c "$cmd" 2>&1)
     local exitcode=$?
-
+    
     if [ $exitcode -eq 0 ]; then
-
+    
         echo "$output" | while read -r line; do
-
             debug_write "  $line"
-
         done
-
+    
     else
-
+    
         debug_write "ERROR ($exitcode):"
-
         echo "$output" | while read -r line; do
+    
             debug_write "  $line"
+    
         done
     fi
-
+    
     return $exitcode
 }
+
 
 debug_rotate_logs_by_size() {
 
