@@ -37,32 +37,6 @@ ui_lines() {
     [ "$padding" -gt 0 ] && printf '%*s' "$padding" '' | tr ' ' '='
     printf '\n'
 }
-get_next_tag_id() {
-    local file="$1"
-    local tag="$2"
-    local max_id=$(grep "# wg-autoconf $tag start id" "$file" 2>/dev/null | sed 's/.*id //g' | sort -n | tail -1)
-    [ -z "$max_id" ] && max_id=0
-    echo $((max_id + 1))
-}
-remove_tagged_block() {
-    local file="$1"
-    local tag="$2"
-    local tag_id="$3"
-    [ -f "$file" ] || error "$file does not exist!"
-    if ! grep -q "# wg-autoconf $tag start id $tag_id" "$file" 2>/dev/null; then
-        warning "Tag '$tag' with id $tag_id not found in $file. Skipping..."
-        return 0
-    fi
-    local temp_file="/tmp/wg-autoconf-remove-${tag}-${tag_id}-$$.tmp"
-    sed -n "/# wg-autoconf $tag start id $tag_id/,/# wg-autoconf $tag end id $tag_id/!p" "$file" > "$temp_file" 2>/dev/null
-    if [ -s "$temp_file" ]; then
-        mv "$temp_file" "$file" 2>/dev/null || error "Failed to remove block from $file"
-        verbose success "Removed '$tag' block (id: $tag_id) from $file"
-    else
-        rm "$temp_file" 2>/dev/null
-        error "Failed to process $file while removing '$tag' block (id: $tag_id)"
-    fi
-}
 get_all_wg_interfaces() {
     uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | cut -d. -f2 | cut -d= -f1 | sort -u
 }
@@ -89,6 +63,32 @@ address_exists() {
         fi
     done
     return 1
+}
+get_next_tag_id() {
+    local file="$1"
+    local tag="$2"
+    local max_id=$(grep "# wg-autoconf $tag start id" "$file" 2>/dev/null | sed 's/.*id //g' | sort -n | tail -1)
+    [ -z "$max_id" ] && max_id=0
+    echo $((max_id + 1))
+}
+remove_tagged_block() {
+    local file="$1"
+    local tag="$2"
+    local tag_id="$3"
+    [ -f "$file" ] || error "$file does not exist!"
+    if ! grep -q "# wg-autoconf $tag start id $tag_id" "$file" 2>/dev/null; then
+        warning "Tag '$tag' with id $tag_id not found in $file. Skipping..."
+        return 0
+    fi
+    local temp_file="/tmp/wg-autoconf-remove-${tag}-${tag_id}-$$.tmp"
+    sed -n "/# wg-autoconf $tag start id $tag_id/,/# wg-autoconf $tag end id $tag_id/!p" "$file" > "$temp_file" 2>/dev/null
+    if [ -s "$temp_file" ]; then
+        mv "$temp_file" "$file" 2>/dev/null || error "Failed to remove block from $file"
+        verbose success "Removed '$tag' block (id: $tag_id) from $file"
+    else
+        rm "$temp_file" 2>/dev/null
+        error "Failed to process $file while removing '$tag' block (id: $tag_id)"
+    fi
 }
 clean_wg_key() {
     local key="$1"

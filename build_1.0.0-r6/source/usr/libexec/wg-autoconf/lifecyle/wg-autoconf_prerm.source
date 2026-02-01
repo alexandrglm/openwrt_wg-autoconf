@@ -2,11 +2,8 @@
 # rel6 pre_deinstall() lifecycle method
 
 if /usr/bin/wg-autoconf nuke 2>/dev/null; then
-
     echo "[wg-autoconf] Full deinstalling NUKE successful!" > /dev/kmsg
-
 else
-
     echo "[wg-autoconf] Deinstall NUKE failed, using fallback emergency cleanup" > /dev/kmsg
     
     for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z_-]*" | sort -u); do
@@ -21,36 +18,55 @@ else
     
     grep "^[0-9]\+[[:space:]]\+.*_vpn_wg" /etc/iproute2/rt_tables 2>/dev/null | while read -r line; do
         table_name=$(echo "$line" | awk '{print $2}')
-        
         lan_iface=$(echo "$table_name" | sed 's/.*_vpn_wg[^_]*_//g')
         lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
         lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
         
         if [ -n "$lan_ip" ]; then
-    
             case "$lan_netmask" in
                 255.255.255.0) cidr=24 ;;
                 255.255.0.0) cidr=16 ;;
                 255.0.0.0) cidr=8 ;;
                 *) cidr=24 ;;
             esac
-            
             subnet="${lan_ip%.*}.0/$cidr"
-            
             ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
             ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
             ip route flush table "$table_name" 2>/dev/null
         fi
-        
-
         sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
-    
     done
     
+    # TODO: Improve/FIx validate_backup hardcoded func here
     for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
         [ -f "$backup" ] || continue
+        
         original="${backup%.BACKUP_PRE_WIREGUARD}"
-        cp "$backup" "$original" 2>/dev/null
+        
+
+        # VERIFY TAG
+        if ! head -1 "$backup" | grep -q "WG_AUTOCONF_BACKUP"; then
+
+            echo "[wg-autoconf] WARNING: Backup corrupted (TAG): $backup" > /dev/kmsg
+            echo -e "\033[1;33m[WARNING]\033[0m Backup corrutped (missing auto-tag): $backup. Not restoring!"
+
+            continue
+        
+        fi
+        
+        # THEN, AGAIN, VERIFY BUT NATIVE CONTENT SUMS
+        stored_sum=$(tail -1 "$backup" | awk '{print $4}')
+        computed_sum=$(sed '1d; $d' "$backup" | sha256sum | cut -d' ' -f1)
+        
+        if [ "$stored_sum" != "$computed_sum" ]; then
+            
+            echo "[wg-autoconf] WARNING: Backup corrupted (SUMS): $backup" > /dev/kmsg
+            echo -e "\033[1;33m[WARNING]\033[0m Backup corrutped (checksum mistmatch): $backup. Not restoring!"
+            continue
+        
+        fi
+        
+        sed '1d; $d' "$backup" > "$original" 2>/dev/null
         rm -f "$backup" 2>/dev/null
     done
     
@@ -58,7 +74,6 @@ else
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall restart 2>/dev/null
-    
     echo "[wg-autoconf] Emergency deinstalling cleanup successful!" > /dev/kmsg
 fi
 

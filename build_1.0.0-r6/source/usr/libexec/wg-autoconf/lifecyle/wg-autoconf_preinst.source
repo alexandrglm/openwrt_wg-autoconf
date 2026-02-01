@@ -7,15 +7,15 @@ if ip link show 2>/dev/null | grep -qE '^ *[0-9]+: wg[a-zA-Z0-9_-]+'; then
     has_garbage=1
 fi
 
-if [ -z "$has_garbage" ] && find /etc/config -name "*.BACKUP_PRE_WIREGUARD" 2>/dev/null | grep -q .; then
+if [ "$has_garbage" != "1" ] && find /etc/config -name "*.BACKUP_PRE_WIREGUARD" 2>/dev/null | grep -q .; then
     has_garbage=1
 fi
 
-if [ -z "$has_garbage" ] && grep -q "# wg-autoconf" /etc/config/network /etc/config/dhcp /etc/config/firewall 2>/dev/null; then
+if [ "$has_garbage" != "1" ] && grep -q "# wg-autoconf" /etc/config/network /etc/config/dhcp /etc/config/firewall 2>/dev/null; then
     has_garbage=1
 fi
 
-if [ -z "$has_garbage" ] && grep -q ".*_vpn_wg" /etc/iproute2/rt_tables 2>/dev/null; then
+if [ "$has_garbage" != "1" ] && grep -q ".*_vpn_wg" /etc/iproute2/rt_tables 2>/dev/null; then
     has_garbage=1
 fi
 
