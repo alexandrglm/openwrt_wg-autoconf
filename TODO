@@ -1,0 +1,6 @@
+### 1.0.0-r7
+- Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
+- `list_configs`, `list_configs_full`: Improve usability
+- `nuke_all`, nuke, clean funcs:  Refactor in one master-func, which dispatches "nuke mode", or "clean <iface> mode" straightforward; also emergency cleanups hardcoded logic
+- Review and fix every `verbose`, `debug_write`, `debug`, callbacks.
+- Unified syntax:  Ternaries, Arrays destructuring, `echo` and `read -p` VS `printf`, POSIX --> Test on many different Busybox-Ash shells
