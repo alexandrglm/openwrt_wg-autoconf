@@ -4,3 +4,4 @@
 - `nuke_all`, nuke, clean funcs:  Refactor in one master-func, which dispatches "nuke mode", or "clean <iface> mode" straightforward; also emergency cleanups hardcoded logic
 - Review and fix every `verbose`, `debug_write`, `debug`, callbacks.
 - Unified syntax:  Ternaries, Arrays destructuring, `echo` and `read -p` VS `printf`, POSIX --> Test on many different Busybox-Ash shells
+- Add IPv6 `--advanced` support
