@@ -34,20 +34,40 @@ start() {
                 255.0.0.0) cidr=8 ;;
                 *) cidr=24 ;;
             esac
-            
             subnet="${lan_ip%.*}.0/$cidr"
             ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
             ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
             ip route flush table "$table_name" 2>/dev/null
         fi
-        
         sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
     done
     
+    # TODO: Improve/FIx validate_backup hardcoded func here
     for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
         [ -f "$backup" ] || continue
+        
         original="${backup%.BACKUP_PRE_WIREGUARD}"
-        cp "$backup" "$original" 2>/dev/null
+        
+        # VERUFY TAG
+        if ! head -1 "$backup" | grep -q "WG_AUTOCONF_BACKUP"; then
+
+            echo "[INIT.D/wg-autoconf_boot_cleanup] WARNING: Backup corrupted (missing TAG): $backup" > /dev/kmsg
+        
+            continue
+        fi
+        
+        # THEN, AGAIN, VERIFY BUT NATIVE CONTENT SUMS
+        stored_sum=$(tail -1 "$backup" | awk '{print $4}')
+        computed_sum=$(sed '1d; $d' "$backup" | sha256sum | cut -d' ' -f1)
+        
+        if [ "$stored_sum" != "$computed_sum" ]; then
+            
+            echo "[INIT.D/wg-autoconf_boot_cleanup] WARNING: Backup corrupted (checksum mismatch): $backup" > /dev/kmsg
+            
+            continue
+        fi
+        
+        sed '1d; $d' "$backup" > "$original" 2>/dev/null
         rm -f "$backup" 2>/dev/null
     done
     
@@ -56,8 +76,7 @@ start() {
     uci commit firewall 2>/dev/null
     sleep 1
     /etc/init.d/firewall reload 2>/dev/null
-    
-    echo "[INIT.D/wg-autoconf_boot_cleanup] Emergency boot cleanup completed. Check wg-autoconf bin?" > /dev/kmsg
+    echo "[INIT.D/wg-autoconf_boot_cleanup] Emergency boot cleanup completed successfully!" > /dev/kmsg
 }
 
 stop() {

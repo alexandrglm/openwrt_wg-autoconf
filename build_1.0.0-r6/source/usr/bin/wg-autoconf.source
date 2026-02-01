@@ -33,7 +33,7 @@
 ######################################################################
 
 
-VERSION="v1.0.0-r5"
+VERSION="v1.0.0-r6"
 
 WG_CONF_DIR="/etc/wireguard"
 NETWORK_CONF="/etc/config/network"
@@ -1730,76 +1730,105 @@ backup_config_file() {
 
     local file="$1"
     local backup_file="${file}.BACKUP_PRE_WIREGUARD"
-
+    
     [ -f "$backup_file" ] && return 0
-
-    cp "$file" "$backup_file" 2>/dev/null || error "Failed to backup $file"
-
+    
+    local tag="# WG_AUTOCONF_BACKUP_v1.0.0-r6_$(date +%s)"
+    
+    {
+        echo "$tag"
+        cat "$file"
+    } > "$backup_file" 2>/dev/null || error "Failed to backup $file" && debug_write "[BACKUP] Failed to Failed to backup $file; check tampered bin? check entire backup logic?"
+    
+    local checksum=$(tail -n +2 "$backup_file" | sha256sum | cut -d' ' -f1)
+    echo "# WG_AUTOCONF_CHECKSUM: $checksum" >> "$backup_file"
+    
     verbose success "Backed up $file -> $backup_file"
+}
+#####################################################################
+# TAG HANDLER -> Validate backup integrity
+validate_backup() {
+    
+    local backup_file="$1"
+    
+    if ! head -1 "$backup_file" | grep -q "WG_AUTOCONF_BACKUP"; then
+        return 1
+    fi
+    
+    local stored_sum=$(tail -1 "$backup_file" | awk '{print $4}')
+    local computed_sum=$(sed '1d; $d' "$backup_file" | sha256sum | cut -d' ' -f1)
+    
+    [ "$stored_sum" = "$computed_sum" ] && return 0 || return 1
 }
 #####################################################################
 # TAG HANDLER -> Show backup files
 show_backups() {
-
+    
     log "Available backup files:"
     echo ""
-
-    backup_found=0
-
+    
+    local backup_found=0
+    
     for path in $BACKUP_PATHS; do
-        backup_file="${path}.BACKUP_PRE_WIREGUARD"
-
+        local backup_file="${path}.BACKUP_PRE_WIREGUARD"
+        
         if [ -f "$backup_file" ]; then
             backup_found=1
-            backup_size=$(ls -lh "$backup_file" | awk '{print $5}')
-            backup_date=$(ls -l "$backup_file" | awk '{print $6" "$7" "$8}')
-
-            success "$(basename $path)"
+            local backup_size=$(ls -lh "$backup_file" | awk '{print $5}')
+            local backup_date=$(ls -l "$backup_file" | awk '{print $6" "$7" "$8}')
+            local backup_tag=$(head -1 "$backup_file" | sed 's/^# //')
+            
+            if validate_backup "$backup_file"; then
+                success "$(basename $path) [VALID]"
+            else
+                warning "$(basename $path) [CORRUPTED]"
+            fi
+            
             echo -e "      Path: ${YELLOW}$backup_file${NC}"
+            echo -e "      Tag:  ${YELLOW}$backup_tag${NC}"
             echo -e "      Size: ${YELLOW}$backup_size${NC} | Date: ${YELLOW}$backup_date${NC}"
             echo ""
         fi
     done
-
+    
     if [ $backup_found -eq 0 ]; then
         warning "No backup files found!"
         return 1
     fi
-
+    
     return 0
 }
-
-
 #####################################################################
 # TAG HANDLER -> Restore backup files
 restore_backups() {
-
+    
     local file_to_restore="$1"
-
     log "Restoring backup files..."
     echo ""
-
-    restore_count=0
-
+    local restore_count=0
+    
     for path in $BACKUP_PATHS; do
-        backup_file="${path}.BACKUP_PRE_WIREGUARD"
-        config_name=$(basename "$path")
-
-        if [ -n "$file_to_restore" ] && [ "$config_name" != "$file_to_restore" ]; then
-            continue
-        fi
-
+        local backup_file="${path}.BACKUP_PRE_WIREGUARD"
+        local config_name=$(basename "$path")
+        
+        [ -n "$file_to_restore" ] && [ "$config_name" != "$file_to_restore" ] && continue
+        
         if [ ! -f "$backup_file" ]; then
             warning "Backup not found for $config_name. Skipping..."
             continue
         fi
-
+        
+        if ! validate_backup "$backup_file"; then
+            error "Backup corrupted or invalid for $config_name. Aborting restore!"
+            continue
+        fi
+        
         printf "Restore $config_name? (y/N): "
         read -r response
-
         case "$response" in
             y|Y|yes|YES|Yes)
-                cp "$backup_file" "$path" 2>/dev/null || error "Failed to restore $path"
+                # Remove tag and checksum before restoring
+                sed '1d; $d' "$backup_file" > "$path" 2>/dev/null || error "Failed to restore $path"
                 success "Restored $config_name from backup"
                 restore_count=$((restore_count + 1))
                 ;;
@@ -1808,36 +1837,33 @@ restore_backups() {
                 ;;
         esac
     done
-
+    
     echo ""
-
+    
     if [ $restore_count -eq 0 ]; then
         warning "No files were restored"
         return 1
     fi
-
+    
     success "$restore_count file(s) restored. Committing changes..."
     echo ""
-
+    
     printf "Commit changes to system? (y/N): "
     read -r confirm_commit
-
     case "$confirm_commit" in
         y|Y|yes|YES|Yes)
-
             uci commit network 2>/dev/null && success "network committed"
             uci commit dhcp 2>/dev/null && success "dhcp committed"
             uci commit firewall 2>/dev/null && success "firewall committed"
             ;;
         *)
-
             warning "Changes NOT committed. Manual commit required"
             echo "  uci commit network"
             echo "  uci commit dhcp"
             echo "  uci commit firewall"
             ;;
     esac
-
+    
     return 0
 }
 
@@ -2118,109 +2144,131 @@ cleanup_wireguard_routes() {
 #####################################################################
 cleanup_config_files() {
     local force_yes="${1:-0}"
-
     log "Cleaning up configuration files..."
-
+    
     # -------------------------------------------------------------------
     # 1. REMOVE ALL TAGGED CONFIGURATION BLOCKS
     # -------------------------------------------------------------------
-    # GET and EXTRACT
     local all_network_ids=$(grep "# wg-autoconf network start id" "$NETWORK_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_dhcp_ids=$(grep "# wg-autoconf dhcp start id" "$DHCP_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_firewall_ids=$(grep "# wg-autoconf firewall start id" "$FIREWALL_CONF" 2>/dev/null | sed 's/.*id //g')
 
-    # Clean exact TAG-ID blocks for network
     for id in $all_network_ids; do
         remove_tagged_block "$NETWORK_CONF" "network" "$id"
     done
 
-    # Same for DHCP
     for id in $all_dhcp_ids; do
         remove_tagged_block "$DHCP_CONF" "dhcp" "$id"
     done
 
-    # Same for Firewall
     for id in $all_firewall_ids; do
         remove_tagged_block "$FIREWALL_CONF" "firewall" "$id"
     done
 
-    # -------------------------------------------------------------------
-    # 2. UCI COMMIT LIGHT & D0NE & NEXT
-    # -------------------------------------------------------------------
     uci commit firewall 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit network 2>/dev/null
-
     verbose success "Configuration files cleaned"
 
     # -------------------------------------------------------------------
-    # 3. OPTIONAL RESTORATION FROM BACKUPS
+    # 2. OPTIONAL RESTORATION FROM BACKUPS
     # -------------------------------------------------------------------
     echo ""
-
     if [ $force_yes -eq 1 ]; then
+        
         # -------------------------------------------------------------------
-        # 3a. AUTOMATIC MODE: RESTORE WITHOUT CONFIRMATION
+        # 2a. AUTOMATIC MODE: RESTORE WITH VALIDATION
         # -------------------------------------------------------------------
         verbose log "Restoring from backups (automatic mode)..."
-
-        # FIND ALL BACKS
+        
+        local restore_count=0
+        local corruption_found=0
+        
         for path in $BACKUP_PATHS; do
 
-            backup_file="${path}.BACKUP_PRE_WIREGUARD"
-            config_name=$(basename "$path")
-
-            # RESTORE
-            if [ -f "$backup_file" ]; then
-                cp "$backup_file" "$path" 2>/dev/null
-                verbose success "Restored $config_name"
+            local backup_file="${path}.BACKUP_PRE_WIREGUARD"
+            local config_name=$(basename "$path")
+            
+            if [ ! -f "$backup_file" ]; then
+                continue
             fi
+            
+            if ! validate_backup "$backup_file"; then
+                warning "Backup corrupted: $config_name"
+                echo "   File: $backup_file"
+                corruption_found=1
+                continue
+            fi
+            
+            sed '1d; $d' "$backup_file" > "$path" 2>/dev/null || error "Failed to restore $path"
+            verbose success "Restored $config_name"
+            restore_count=$((restore_count + 1))
+        
         done
-
-        # COMMIT LIGHT
-        uci commit network 2>/dev/null
-        uci commit dhcp 2>/dev/null
-        uci commit firewall 2>/dev/null
-
-        verbose success "Backups restored and committed"
-
+        
+        if [ $corruption_found -eq 1 ]; then
+            warning "Some backups are corrupted. Manual review required!"
+        fi
+        
+        if [ $restore_count -gt 0 ]; then
+            uci commit network 2>/dev/null
+            uci commit dhcp 2>/dev/null
+            uci commit firewall 2>/dev/null
+            verbose success "Backups restored and committed"
+        fi
+        
         cleanup_backup_files
-
+    
+    
     else
+
         # -------------------------------------------------------------------
-        # 3b. INTERACTIVE MODE: PROMPT USER FOR CONFIRMATION
+        # 2b. INTERACTIVE MODE: PROMPT USER FOR CONFIRMATION
         # -------------------------------------------------------------------
         read -p "Restore configs from backups? (y/N): " restore_choice
-
         case "$restore_choice" in
             y|Y|yes|YES|Yes)
                 log "Restoring from backups..."
-
-                # FIND ALL BACKS
+                
+                local restore_count=0
+                local corruption_found=0
+                
                 for path in $BACKUP_PATHS; do
-
-                    backup_file="${path}.BACKUP_PRE_WIREGUARD"
-                    config_name=$(basename "$path")
-
-                    # RESTORE
-                    if [ -f "$backup_file" ]; then
-                        cp "$backup_file" "$path" 2>/dev/null
-                        success "Restored $config_name"
+                    local backup_file="${path}.BACKUP_PRE_WIREGUARD"
+                    local config_name=$(basename "$path")
+                    
+                    if [ ! -f "$backup_file" ]; then
+                        continue
                     fi
+                    
+                    if ! validate_backup "$backup_file"; then
+                        warning "Backup corrupted: $config_name"
+                        echo "   File: $backup_file"
+                        corruption_found=1
+                        continue
+                    fi
+                    
+                    sed '1d; $d' "$backup_file" > "$path" 2>/dev/null || error "Failed to restore $path"
+                    success "Restored $config_name"
+                    restore_count=$((restore_count + 1))
                 done
-
+                
+                if [ $corruption_found -eq 1 ]; then
+                    warning "Some backups are corrupted. Manual review required!"
+                fi
+                
                 # COMMIT HARD
-                uci commit network 2>/dev/null
-                uci commit dhcp 2>/dev/null
-                uci commit firewall 2>/dev/null
-                /etc/init.d/firewall reload 2>/dev/nullS
-
-
-                success "Backups restored and committed"
+                if [ $restore_count -gt 0 ]; then
+                    uci commit network 2>/dev/null
+                    uci commit dhcp 2>/dev/null
+                    uci commit firewall 2>/dev/null
+                    /etc/init.d/firewall reload 2>/dev/null
+                    success "Backups restored and committed"
+                fi
+                
                 cleanup_backup_files
                 ;;
             *)
-
                 log "Backups NOT restored. You can do it manually with: wg-autoconf backups restore"
                 ;;
         esac
@@ -2240,7 +2288,7 @@ cleanup_config_files() {
 #   3.  UCI configuration commit
 #   4.  Routing table and rule cleanup
 #   5.  Automatic backup restoration
-#   6.  Backup file cleanup
+#   6.  Backup file verity ok, then cleanup
 #   7.  Completion notification
 #
 # Dependencies:
@@ -2259,19 +2307,14 @@ nuke_all() {
     # -------------------------------------------------------------------
     # 1. GET IFACES AND DESTROY
     # -------------------------------------------------------------------
-    # Retrieve all wg-autoconf managed interfaces
     local interfaces=$(get_all_wg_interfaces)
 
     if [ -n "$interfaces" ]; then
-
         log "Taking down all WireGuard interfaces..."
         for iface in $interfaces; do
-
-            # IFDOWN
             ifdown "$iface" 2>/dev/null
             debug_write "[NUKE] $iface DOWN"
             verbose success "Downed: $iface"
-
         done
         verbose echo ""
     fi
@@ -2282,31 +2325,22 @@ nuke_all() {
     verbose log "Removing configuration blocks..."
     debug_write "[NUKE] Tags/Untag logic petition STARTS"
 
-    # FIND-EXTRACT TAG-ID
     local all_network_ids=$(grep "# wg-autoconf network start id" "$NETWORK_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_dhcp_ids=$(grep "# wg-autoconf dhcp start id" "$DHCP_CONF" 2>/dev/null | sed 's/.*id //g')
     local all_firewall_ids=$(grep "# wg-autoconf firewall start id" "$FIREWALL_CONF" 2>/dev/null | sed 's/.*id //g')
 
-    # REMOVE ITS EXACT BLOCK ON NETWORK
     for id in $all_network_ids; do
         remove_tagged_block "$NETWORK_CONF" "network" "$id"
     done
 
-    # SAME FOR DHCP
     for id in $all_dhcp_ids; do
         remove_tagged_block "$DHCP_CONF" "dhcp" "$id"
     done
 
-    # SAME FOR FIREWALL
     for id in $all_firewall_ids; do
-
         remove_tagged_block "$FIREWALL_CONF" "firewall" "$id"
-
     done
 
-    # -------------------------------------------------------------------
-    # 3. UCI CONFIGURATION HARD
-    # -------------------------------------------------------------------
     uci commit network 2>/dev/null
     uci commit dhcp 2>/dev/null
     uci commit firewall 2>/dev/null
@@ -2319,41 +2353,64 @@ nuke_all() {
     verbose echo ""
 
     # -------------------------------------------------------------------
-    # 4. ROUTING TABLE AND RULE CLEANUP
+    # 3. ROUTING TABLE AND RULE CLEANUP
     # -------------------------------------------------------------------
     verbose log "Cleaning routing tables and rules..."
-
     debug_write "[NUKE] Next ROUTE disabling petition, made by nuke"
     cleanup_wireguard_routes
-
     verbose echo ""
 
     # -------------------------------------------------------------------
-    # 5. AUTOMATIC BACKUP RESTORATION
+    # 4. AUTOMATIC BACKUP RESTORATION
     # -------------------------------------------------------------------
     verbose log "Restoring from backups..."
+    echo ""
 
-    # RESTORE
+    local restore_count=0
+    local corruption_found=0
+
     for path in $BACKUP_PATHS; do
 
-        backup_file="${path}.BACKUP_PRE_WIREGUARD"
-        config_name=$(basename "$path")
-
-        # CHECK BACKS
-        if [ -f "$backup_file" ]; then
-
-            cp "$backup_file" "$path" 2>/dev/null
-            success "Restored $config_name"
+        local backup_file="${path}.BACKUP_PRE_WIREGUARD"
+        local config_name=$(basename "$path")
+        
+        if [ ! -f "$backup_file" ]; then
+            continue
         fi
-
+        
+        if ! validate_backup "$backup_file"; then
+            warning "Backup corrupted: $config_name"
+            echo "   File: $backup_file"
+            corruption_found=1
+            continue
+        fi
+        
+        sed '1d; $d' "$backup_file" > "$path" 2>/dev/null || error "Failed to restore $path" && debug_write "[BACKUP]"
+        success "Restored $config_name"
+        restore_count=$((restore_count + 1))
     done
 
-    # COMMIT LIGHT
-    uci commit network 2>/dev/null
-    uci commit dhcp 2>/dev/null
-    uci commit firewall 2>/dev/null
+    echo ""
 
-    debug_write "[NUKE] Backups restored, removed and comitted"
+    if [ $corruption_found -eq 1 ]; then
+        error "Some backups are corrupted. Manual review required!"
+        return 1
+    fi
+
+    if [ $restore_count -eq 0 ]; then
+    
+        warning "No backups to restore"
+    
+    else
+    
+        # COMMIT LIGHT
+        success "$restore_count file(s) restored successfully"
+        uci commit network 2>/dev/null
+        uci commit dhcp 2>/dev/null
+        uci commit firewall 2>/dev/null
+    fi
+
+    debug_write "[NUKE] Backups restored and committed"
     verbose success "Backups restored and committed"
     verbose echo ""
 
