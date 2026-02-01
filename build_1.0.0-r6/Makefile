@@ -28,9 +28,9 @@ define Package/wg-autoconf
 endef
 
 define Package/wg-autoconf/description
-	Automates multiple WireGuard VPN interface setup with batch
-	configuration, policy-based routing, and cleanup operations.
-	Easy and safe WireGuard tunneling manager for OpenWrt.
+	CLI tool for handling (multiple) WireGuard setups, with
+	batch configs, policy-based routing, and cleanup operations.
+	Easy and safe WireGuard-VPN tunneling manager for OpenWrt.
 	DOC: https://github.com/alexandrglm/openwrt_wg-autoconf
 endef
 
