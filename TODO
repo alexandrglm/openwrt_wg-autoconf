@@ -5,3 +5,4 @@
 - Review and fix every `verbose`, `debug_write`, `debug`, callbacks.
 - Unified syntax:  Ternaries, Arrays destructuring, `echo` and `read -p` VS `printf`, POSIX --> Test on many different Busybox-Ash shells
 - Add IPv6 `--advanced` support
+- Add DNS resolv pre-checks for auto and `--advanced` mode
