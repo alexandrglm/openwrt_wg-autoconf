@@ -2,7 +2,7 @@
 - Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
 - `list_configs`, `list_configs_full`: Improve usability
 - `nuke_all`, nuke, clean funcs:  Refactor in one master-func, which dispatches "nuke mode", or "clean <iface> mode" straightforward; also emergency cleanups hardcoded logic
-- Review and fix every `verbose`, `debug_write`, `debug`, callbacks.
+- Review and fix every `verbose`, `debug_write`, `debug`, callbacks. Also clear all `debug_validate` checks on cleaning pre-build stage
 - Unified syntax:  Ternaries, Arrays destructuring, `echo` and `read -p` VS `printf`, POSIX --> Test on many different Busybox-Ash shells
 - Add IPv6 `--advanced` support
 - Add DNS resolv pre-checks for auto and `--advanced` mode
