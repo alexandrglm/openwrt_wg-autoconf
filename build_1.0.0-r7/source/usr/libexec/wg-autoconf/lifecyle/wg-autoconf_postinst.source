@@ -6,5 +6,5 @@ chmod +x /etc/init.d/wg-autoconf_boot_cleanup
 sleep 1
 /etc/init.d/wg-autoconf_boot_cleanup enable 2>/dev/null
 # /etc/init.d/wg-autoconf_boot_cleanup start 2>/dev/null
-echo "[wg-autoconf] Succesfully installed!" > /dev/kmsg
+echo "[wg-autoconf 1.0.0-r7] Succesfully installed!" > /dev/kmsg
 exit 0
