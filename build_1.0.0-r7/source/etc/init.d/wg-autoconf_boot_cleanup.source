@@ -1,0 +1,88 @@
+#!/bin/ash /etc/rc.common
+# wg-autoconf_boot_cleanup for 1.0.0-rel6
+START=93
+
+start() {
+    
+    if /usr/bin/wg-autoconf nuke 2>/dev/null; then
+        echo "[INIT.D/wg-autoconf_boot_cleanup] NUKE completed successfully" > /dev/kmsg
+        return 0
+    fi
+    
+    echo "[INIT.D/wg-autoconf_boot_cleanup] NUKE failed, using fallback cleanup..." > /dev/kmsg
+    
+    for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z_-]*" | sort -u); do
+        ip link delete "$iface" 2>/dev/null
+    done
+    
+    uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | \
+    cut -d. -f2 | cut -d= -f1 | while read -r iface; do
+        uci delete "network.$iface" 2>/dev/null
+        uci delete "network.${iface}_peer" 2>/dev/null
+    done
+    
+    grep "^[0-9]\+[[:space:]]\+.*_vpn_wg" /etc/iproute2/rt_tables 2>/dev/null | while read -r line; do
+        table_name=$(echo "$line" | awk '{print $2}')
+        lan_iface=$(echo "$table_name" | sed 's/.*_vpn_wg[^_]*_//g')
+        lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
+        lan_netmask=$(uci get "network.$lan_iface.netmask" 2>/dev/null)
+        
+        if [ -n "$lan_ip" ]; then
+            case "$lan_netmask" in
+                255.255.255.0) cidr=24 ;;
+                255.255.0.0) cidr=16 ;;
+                255.0.0.0) cidr=8 ;;
+                *) cidr=24 ;;
+            esac
+            subnet="${lan_ip%.*}.0/$cidr"
+            ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
+            ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
+            ip route flush table "$table_name" 2>/dev/null
+        fi
+        sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables
+    done
+    
+    # TODO: Improve/FIx validate_backup hardcoded func here
+    for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
+        [ -f "$backup" ] || continue
+        
+        original="${backup%.BACKUP_PRE_WIREGUARD}"
+        
+        # VERUFY TAG
+        if ! head -1 "$backup" | grep -q "WG_AUTOCONF_BACKUP"; then
+
+            echo "[INIT.D/wg-autoconf_boot_cleanup] WARNING: Backup corrupted (missing TAG): $backup" > /dev/kmsg
+        
+            continue
+        fi
+        
+        # THEN, AGAIN, VERIFY BUT NATIVE CONTENT SUMS
+        stored_sum=$(tail -1 "$backup" | grep -o '[0-9a-f]\{64\}' | head -1)
+        computed_sum=$(sed '1d; $d' "$backup" | sha256sum | cut -d' ' -f1)
+        
+        if [ "$stored_sum" != "$computed_sum" ]; then
+            
+            echo "[INIT.D/wg-autoconf_boot_cleanup] WARNING: Backup corrupted (checksum mismatch): $backup" > /dev/kmsg
+            
+            continue
+        fi
+        
+        sed '1d; $d' "$backup" > "$original" 2>/dev/null
+        rm -f "$backup" 2>/dev/null
+    done
+    
+    uci commit network 2>/dev/null
+    uci commit dhcp 2>/dev/null
+    uci commit firewall 2>/dev/null
+    sleep 1
+    /etc/init.d/firewall reload 2>/dev/null
+    echo "[INIT.D/wg-autoconf_boot_cleanup] Emergency boot cleanup completed successfully!" > /dev/kmsg
+}
+
+stop() {
+    :
+}
+
+restart() {
+    start
+}

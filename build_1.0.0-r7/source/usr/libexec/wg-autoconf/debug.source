@@ -1,0 +1,30 @@
+# debug rel5
+debug_log() {
+
+    local msg="$1"
+    local log_dir="/etc/libexec/wg-autoconf/logs"
+    local log_file
+
+    local version="1.0.0-r3"
+    local header='===[ wg-autoconf $version DEBUGGING log ]===========
+
+pkgname=wg-autoconf
+pkgver=$version
+pkgrel=
+
+===================================================
+'
+
+    mkdir -p "$log_dir" 2>/dev/null || {
+        log_dir="/tmp/wg-autoconf-logs"
+        mkdir -p "$log_dir" 2>/dev/null || return 1
+    }
+
+    log_file="$log_dir/wg-autoconf.log"
+
+    if [ ! -f "$log_file" ]; then
+        printf "%s\n" "$header" > "$log_file" || return 1
+    fi
+
+    printf "[%s] (%s) \"%s\"\n" "$version" "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> "$log_file"
+}
