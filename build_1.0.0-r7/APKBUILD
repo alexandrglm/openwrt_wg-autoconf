@@ -29,5 +29,5 @@ package() {
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
 }
 sha512sums="
-9a2337106483fd637af5d2d2a5f491bc353624a404e1ea76e6bfee76aacd66b5f09098081248a438e1c746bf4cc1f2bfbba54e7d5be91ac4b1ae2c4ba0842919  source.tar.gz
+04113124a0940327a6e136d42079bff66ce4d0f3f438a31f7079d533b5c71ecf2bf5693116a482b9ee5ec9e82998f3cd28e7ca5d28078b2a911036fbe198ea86  source.tar.gz
 "
