@@ -798,7 +798,7 @@ setup_wireguard() {
     fi
     state_init
     if ! state_check_first_exec; then
-        log "Checking previous WireGuard configuration..."
+        verbose log "Checking previous WireGuard configuration..."
         local active_ifaces=$(get_all_wg_interfaces)
         local has_tags=$(grep -c "# wg-autoconf" "$NETWORK_CONF" "$DHCP_CONF" "$FIREWALL_CONF" 2>/dev/null | grep -v ":0$" | wc -l)
         local has_tables=$(grep -c "_vpn_" /etc/iproute2/rt_tables 2>/dev/null || echo 0)
@@ -816,7 +816,8 @@ setup_wireguard() {
             echo ""
             verbose log "If you think there should be no pre-existing configuration, abort now and run 'wg-autoconf nuke' to ensure a clean slate"
             verbose echo ""
-            read -p "Proceed with another WG setup? (y/N): " confirm
+            printf "${GREEN}Proceed with another WG setup? (y/${NC}${RED}N${NC}${GREEN}):${NC} "
+            read -r confirm
             case "$confirm" in
                 y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                     ;;
@@ -1064,7 +1065,7 @@ setup_wireguard() {
                 success "Configuration file saved as $conf_filename.conf"
                 ;;
             *)
-                log "Configuration NOT saved to file"
+                verbose warning "Configuration NOT saved to file"
                 ;;
         esac
         read -p "Confirm setup? (y/N): " confirm
@@ -1108,17 +1109,17 @@ setup_wireguard() {
     verbose success "D0ne!"
     echo ""
     ui_lines 65 "${GREEN}WireGuard CONFIG${NC}"
-    echo -e "${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
-    echo -e "${BLUE}Local IP:${NC}            ${YELLOW}$address${NC}"
-    echo -e "${BLUE}Endpoint:${NC}            ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
-    echo -e "${BLUE}DNS:${NC}                 ${YELLOW}${dns}${NC}"
+    echo -e "- ${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
+    echo -e "- ${BLUE}Local IP:${NC}            ${YELLOW}$address${NC}"
+    echo -e "- ${BLUE}Endpoint:${NC}            ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
+    echo -e "- ${BLUE}DNS:${NC}                 ${YELLOW}${dns}${NC}"
     ui_lines 65 "${GREEN}FINISH SETUP${NC}"
     echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
     echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
     echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
     echo -e "${GREEN}4.${NC} ${BLUE}ROUTE LANs:${NC}        ${YELLOW}wg-autoconf routes set $iface_name <lan_iface>${NC}"
     echo ""
-    ui_lines 80
+    ui_lines 66
 }
 save_wireguard_conf() {
     local conf_filename="$1"
@@ -1221,9 +1222,9 @@ activate_interface() {
                 debug_write "    Tampered bin? Bad uninstall method? CLEAN ALL NOW! (Nuke)"
             fi
         fi
-        success "$iface enabled!"
+        success "Interface '$iface' enabled!"
         debug_write "[UP] Interface $iface successfully enabled"
-        debug wc show "$iface"
+        debug wg show "$iface"
         if [ "$VERBOSE" = "1" ]; then
             echo ""
             echo "$iface Info:"    
@@ -1861,7 +1862,6 @@ cleanup() {
     local mode="$1"
     local target_iface="$2"
     local silent="${3:-}"
-    upgrade_avoid_garbage
     if [ -z "$mode" ] || ! echo "$mode" | grep -qE "^(single|interactive|nuke)$"; then
         error "cleanup: Invalid mode '$mode' (use: ${YELLOW}clean${NC} <iface> | ${YELLOW}clean${NC} | ${RED}nuke{NC} )"
         return 1
@@ -1925,6 +1925,7 @@ cleanup() {
             debug_write "[CLEANUP INTERACTIVE] Selected interface: $interfaces"
             ;;
         nuke)
+            state_reset
             interfaces=$(get_all_wg_interfaces)
             interactive=0
             silent="silent"
@@ -1939,6 +1940,7 @@ cleanup() {
     local error_count=0
     for iface in $interfaces; do
         if [ "$silent" != "silent" ]; then
+            debug_write "[CLEANUP] Starting cleanup-no-nuke execution, WG interace = $iface "
             log "Cleaning up $iface..."
             echo ""
         fi
@@ -1946,8 +1948,7 @@ cleanup() {
             local addr=$(uci get "network.$iface.addresses" 2>/dev/null || echo "N/A")
             local ep=$(uci get "network.${iface}_peer.endpoint_host" 2>/dev/null || echo "N/A")
             echo ""
-            ui_lines 50
-            echo "Interface: $iface"
+            ui_lines 49 " ${GREEN}$iface${NC}"
             echo "Address: $addr"
             echo "Endpoint: $ep"
             ui_lines 50
@@ -1967,7 +1968,7 @@ cleanup() {
         local rt_tables=$(grep "_vpn_${iface}" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
         if [ -n "$rt_tables" ]; then
             if [ "$silent" != "silent" ]; then
-                verbose log "Unsetting routes..."
+                verbose log "Unsetting routes for $iface..."
             fi
             for table in $rt_tables; do
                 local lan_iface=""
@@ -1982,7 +1983,7 @@ cleanup() {
                         }
                     }')
                 fi
-                debug_write "[CLEANUP] Processing route table: $table → LAN iface: '$lan_iface'"
+                debug_write "[CLEANUP] Processing route table: $table -> LAN iface: '$lan_iface'"
                 if [ -n "$lan_iface" ] && [ "$lan_iface" != "$table" ]; then
                     local lan_exists=0
                     if uci get "network.$lan_iface" >/dev/null 2>&1; then
@@ -2010,7 +2011,10 @@ cleanup() {
                             ip rule del $(echo "$rule" | awk -F: '{print $1}') 2>/dev/null
                         done
                         ip route flush table "$table" 2>/dev/null
-                        sed -i "/^[0-9]\+[[:space:]]\+${table}$/d" /etc/iproute2/rt_tables 2>/dev/null
+                        cp /etc/iproute2/rt_tables ${ATOMIC_PATHS}/rt_tables.atomic
+                        sed "/^[0-9]\+[[:space:]]\+${TABLE_NAME}$/d" "${ATOMIC_PATHS}/rt_tables.atomic" > "${ATOMIC_PATHS}/rt_tables.tmp" && \
+                        mv "${ATOMIC_PATHS}/rt_tables.tmp" /etc/iproute2/rt_tables
+                        rm -f "${ATOMIC_PATHS}/rt_tables.atomic"
                         debug_write "[CLEANUP] Cleaned orphaned routing table: $table"
                     fi
                 else
@@ -2081,23 +2085,27 @@ cleanup() {
         fi
     done
     debug_write "[CLEANUP] Completed: mode=$mode, processed=$processed_count, errors=$error_count"
-    if [ $error_count -eq 0 ]; then
+    if [ "$silent" = "silent"  ]; then
         state_reset
+    fi
+    if [ $error_count -eq 0 ]; then
+        debug_write ""
         if [ "$silent" != "silent" ]; then
             echo ""
             success "Cleanup completed successfully!"
+            verbose log "At the time, all cleanup operations are done. You may prefer to check config. files, UCI state, etc."
         fi
         return 0
     else
+        debug_write "[CLEAN] Errors ($error_count) found when cleanups:"
+        debug_write ""
+        debug cat /usr/libexec/wg-autoconf/states
+        debug_write ""
+        debug ip link show | grep wg
+        debug_write ""
+        debug cat /etc/iproute2/rt_tables
+        debug_write ""
         if [ "$silent" != "silent" ]; then
-            debug_write "[CLEAN] Errors ($error_count) found when cleanups:"
-            debug_write ""
-            debug cat /usr/libexec/wg-autoconf/states
-            debug_write ""
-            debug ip link show | grep wg
-            debug_write ""
-            debug cat /etc/iproute2/rt_tables
-            debug_write ""
             echo ""
             warning "Cleanup completed with $error_count error(s)"
         fi
@@ -2200,6 +2208,17 @@ set_lan_routes() {
     verbose log "LAN subnet: $subnet"
     local table_name="_vpn_${wg_iface}_${lan_iface}"
     if [ -f /etc/iproute2/rt_tables ]; then
+        local existing_tables=$(grep "_vpn_.*_${lan_iface}$" /etc/iproute2/rt_tables 2>/dev/null)
+        if [ -n "$existing_tables" ]; then
+            local same_wg_table=$(echo "$existing_tables" | grep "^[0-9]\+ _vpn_${wg_iface}_${lan_iface}$")
+            if [ -z "$same_wg_table" ]; then
+                debug_write "[ROUTES SET] Denied overwriting/re-routing an already in-use iface ($lan_iface)"
+                error "'$lan_iface' is already routed to another WireGuard interface! Please use another destination interface"
+                verbose log "To view all the updated routes, run '${GREEN}wg-autoconf status${NC}', or you can have a look directly at '${YELLOW}/etc/iproute2/rt_tables${NC}'."
+            fi
+        fi
+    fi
+    if [ -f /etc/iproute2/rt_tables ]; then
         if ! grep -q "^[0-9]\+ $table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
             local table_id=150
             while grep -q "^$table_id " /etc/iproute2/rt_tables 2>/dev/null && [ $table_id -lt 250 ]; do
@@ -2208,23 +2227,52 @@ set_lan_routes() {
             if [ $table_id -ge 250 ]; then
                 error "Cannot find available routing table ID"
             fi
-            echo "$table_id $table_name" >> /etc/iproute2/rt_tables
+            local atomic_file="${ATOMIC_PATHS}/rt_tables.atomic.$$"
+            if ! cp /etc/iproute2/rt_tables "$atomic_file" 2>/dev/null; then
+                error "Failed to copy routing tables for atomic operation"
+            fi
+            echo "$table_id $table_name" >> "$atomic_file" || error "Failed to append to atomic file"
+            if ! grep -q "^$table_id $table_name$" "$atomic_file" 2>/dev/null; then
+                rm -f "$atomic_file" 2>/dev/null
+                error "Failed to verify entry in atomic file"
+            fi
+            if ! mv "$atomic_file" /etc/iproute2/rt_tables; then
+                rm -f "$atomic_file" 2>/dev/null
+                error "Failed to atomically replace routing tables"
+            fi
+            if ! grep -q "^$table_id $table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
+                error "Routing table update verification failed after atomic replace"
+            fi
         fi
     else
+        debug_write "[ROUTES SET] RT_TABLES file NOT FOUND! Check 'ip', reboot, perform a cleanup!"
         warning "Routing tables file not found, attempting to create..."
+        warning "This is trully BIZARRE, please, pay attention:"
+        echo -e "   Your ${RED}/etc/iproute2/rt_tables${NC} is MISSING, and this SHOULD NOT be happening!"
+        echo -e "   To be safe, at this point, a new fully-compatible rt_tables file is being created"
+        echo -e "   Even this will work well, you may prefer to check your configs. and/or reboot the device"
+        verbose echo ""
+        verbose log "The 'rt_tables' file is used by default by a ${YELLOW}CORE${NC} dependency included as standard in ALL OpenWRT builds (the 'ip' package)."        
+        verbose echo -e "   This is highly unusual for this file to be missing. 'wg-autoconf' has encountered this issue and, while it didn't cause the problem, ${GREEN}this issue can be fixed${NC}."        
+        verbose echo -e "   ${YELLOW}HOWEVER, just because it can be fixed temporarily doesn't mean the error won't happen again${NC}; it is up to you to find out what has happened with 'ip'/'rt_tables'"
         mkdir -p /etc/iproute2 2>/dev/null
         {
+            echo "# rt_tables file restored by"
+            echo "#   wg-autoconf $VERSION "
+            echo "# Check your 'ip' package issues!"
             echo "#"
-            echo "# Reserved values"
+            echo "# reserved values"
             echo "#"
+            echo "128     prelocal"
             echo "255     local"
             echo "254     main"
             echo "253     default"
             echo "0       unspec"
             echo "#"
-            echo "# wg-autoconf tables"
+            echo "# local"
             echo "#"
-            echo "150     $table_name"
+            echo "#1      inr.ruhep"
+            echo "$table_id     $table_name"
         } > /etc/iproute2/rt_tables 2>/dev/null
     fi
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
@@ -2328,6 +2376,7 @@ config forwarding\\
 config forwarding\\
     option src '$wg_iface'\\
     option dest '$lan_iface'\\
+\\
 " "$FIREWALL_CONF"
                     if grep -q "option src '$lan_iface'" "$FIREWALL_CONF" 2>/dev/null && \
                         grep -q "option dest '$wg_iface'" "$FIREWALL_CONF" 2>/dev/null; then
@@ -2505,23 +2554,52 @@ unset_lan_routes() {
     fi
     if [ -f /etc/iproute2/rt_tables ]; then
         if grep -q "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
-            local rt_backup="/etc/iproute2/rt_tables.backup.$$"
-            local rt_temp="/etc/iproute2/rt_tables.temp.$$"
-            cp /etc/iproute2/rt_tables "$rt_backup" 2>/dev/null
-            grep -v "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables > "$rt_temp" 2>/dev/null
-            if [ -f "$rt_temp" ] && [ -s "$rt_temp" ]; then
-                if ! diff -q /etc/iproute2/rt_tables "$rt_temp" >/dev/null 2>&1; then
-                    if mv "$rt_temp" /etc/iproute2/rt_tables 2>/dev/null; then
-                        verbose success "Table removed from rt_tables: $table_name"
-                    else
-                        mv "$rt_backup" /etc/iproute2/rt_tables 2>/dev/null
-                    fi
-                else
-                    rm -f "$rt_temp" 2>/dev/null
-                fi
+            local atomic_file="${ATOMIC_PATHS}/rt_tables.unset.$$"
+            if ! grep -v "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables > "$atomic_file" 2>/dev/null; then
+                error "Failed to create filtered routing tables"
             fi
-            rm -f "$rt_backup" 2>/dev/null
+            if [ ! -s "$atomic_file" ]; then
+                rm -f "$atomic_file" 2>/dev/null
+                error "Filtered routing tables file is empty"
+            fi
+            if grep -q "^[0-9]\+[[:space:]]\+$table_name$" "$atomic_file" 2>/dev/null; then
+                rm -f "$atomic_file" 2>/dev/null
+                error "Failed to filter table entry: $table_name"
+            fi
+            if ! mv "$atomic_file" /etc/iproute2/rt_tables; then
+                rm -f "$atomic_file" 2>/dev/null
+                error "Failed to atomically update routing tables"
+            fi
+            verbose success "Table removed from rt_tables: $table_name"
         fi
+        debug_write "[ROUTES UNSET] RT_TABLES file NOT FOUND! Check 'ip', reboot, perform a cleanup!"
+        warning "Routing tables file not found, attempting to create..."
+        warning "This is trully BIZARRE, please, pay attention:"
+        echo -e "   Your ${RED}/etc/iproute2/rt_tables${NC} is MISSING, and this SHOULD NOT be happening!"
+        echo -e "   To be safe, at this point, a new fully-compatible rt_tables file is being created"
+        echo -e "   Even this will work well, you may prefer to check your configs. and/or reboot the device"
+        verbose echo ""
+        verbose log "The 'rt_tables' file is used by default by a ${YELLOW}CORE${NC} dependency included as standard in ALL OpenWRT builds (the 'ip' package)."        
+        verbose echo -e "   This is highly unusual for this file to be missing. 'wg-autoconf' has encountered this issue and, while it didn't cause the problem, ${GREEN}this issue can be fixed${NC}."        
+        verbose echo -e "   ${YELLOW}HOWEVER, just because it can be fixed temporarily doesn't mean the error won't happen again${NC}; it is up to you to find out what has happened with 'ip'/'rt_tables'"
+        mkdir -p /etc/iproute2 2>/dev/null
+        {
+            echo "# rt_tables file restored by"
+            echo "#   wg-autoconf $VERSION "
+            echo "# Check your 'ip' package issues!"
+            echo "#"
+            echo "# reserved values"
+            echo "#"
+            echo "128     prelocal"
+            echo "255     local"
+            echo "254     main"
+            echo "253     default"
+            echo "0       unspec"
+            echo "#"
+            echo "# local"
+            echo "#"
+            echo "#1      inr.ruhep"
+        } > /etc/iproute2/rt_tables 2>/dev/null
     fi
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
@@ -2990,7 +3068,8 @@ state_remove_iface() {
             continue
         fi
         if [ "${line#"#"}" != "$line" ]; then
-            output="${output}${line}"
+            output="${output}${line}
+"
             continue
         fi
         local line_key="${line%%=*}"
@@ -3004,7 +3083,8 @@ state_remove_iface() {
             local other_id=$(echo "$line_key" | sed 's/^ID_\([0-9]*\)_NAME$/\1/')
             if [ "$other_id" != "$id" ]; then
                 remaining_ifaces=$((remaining_ifaces + 1))
-                output="${output}${line}"
+                output="${output}${line}
+"
             fi
             continue
         fi
@@ -3012,7 +3092,8 @@ state_remove_iface() {
             debug_write "[STATE] state_remove_iface: Filtering: $line_key"
             continue
         fi
-        output="${output}${line}"
+        output="${output}${line}
+"
     done < "$STATE_FILE"
     if [ -z "$iface_name" ]; then
         debug_write "[STATE] state_remove_iface: Interface ID $id not found"
@@ -3333,8 +3414,26 @@ debug_handler() {
         status)
             debug_status
             ;;
+        states)
+            cat /usr/libexec/wg-autoconf/states
+            ;;
+        network)
+            cat /etc/config/network
+            ;;
+        dhcp)
+            cat /etc/config/dhcp
+            ;;
+        firewall)
+            cat /etc/config/firewall
+            ;;
+        tables)
+            cat /etc/iproute2/rt_tables
+            ;;
+        backups)
+            ls -Rla /etc/config/*.BACKUP_PRE_WIREGUARD | awk -v YB="\033[1;33m" -v GN="\033[0;32m" -v NC="\033[0m" '{print YB " DATE:" NC "\t", $6, $7, $8, YB " - FILE: " NC GN $9 NC}'
+            ;;
         *)
-            error "Usage: wg-autoconf debug [on|off|show|live|clear|status]"
+            error "${YELLOW}Usage: ${GREEN}wg-autoconf debug${NC} [${BLUE}on | off| show | live | clear | status | states | tables | network | dhcp | firewall${NC}]"
             ;;
     esac
 }
