@@ -43,6 +43,82 @@ ui_lines() {
     [ "$padding" -gt 0 ] && printf '%*s' "$padding" '' | tr ' ' '='
     printf '\n'
 }
+dns_leakage() {
+    local dns_servers="$1"
+    local local_address="$2"
+    local context="$3"
+    local local_ip=$(echo "$local_address" | cut -d/ -f1)
+    local temp_file="${ATOMIC_PATHS}/dns_leakage_$$.tmp"
+    local dns_list=""
+    local has_local_ip_dns=0
+    local has_tunnel_range_dns=0
+    local temp_dns="$dns_servers,"
+    while [ -n "$temp_dns" ]; do
+        dns_entry="${temp_dns%%,*}"
+        dns_entry=$(echo "$dns_entry" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -n "$dns_entry" ]; then
+            if [ -z "$dns_list" ]; then
+                dns_list="$dns_entry"
+            else
+                dns_list="$dns_list, $dns_entry"
+            fi
+            [ "$dns_entry" = "$local_ip" ] && has_local_ip_dns=1
+            if echo "$dns_entry" | grep -qE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' || \
+                echo "$dns_entry" | grep -qE '^[fF][dD][0-9a-fA-F]{2}:' ; then
+                    has_tunnel_range_dns=1
+            fi
+        fi
+        temp_dns="${temp_dns#*,}"
+    done
+    [ -z "$dns_list" ] && return 0
+    warning "   ${YELLOW}DNS Security Note${NC} about $dns_list (use ${BLUE}--verbose${NC} mode)"
+    verbose echo ""
+    verbose ui_lines 49 "${YELLOW}DNS LEAKAGE WARNING${NC}"
+    verbose echo ""
+    verbose echo -e "   ${GREEN}This is a common issue for any WireGuard users & almost any WireGuard providers!${NC}"
+    verbose echo ""
+    if [ $has_local_ip_dns -eq 1 ]; then
+        verbose echo -e "   ${RED}  POTENTIAL DNS LEAK DETECTED${NC}"
+        verbose echo ""
+        verbose echo "   You're using your local VPN IP ($local_ip) as DNS server."
+        verbose echo ""
+        verbose echo -e "   ${YELLOW}Possible issues:${NC}"
+        verbose echo "     1. Provider DNS may be blocked"
+        verbose echo "     2. Provider DNS may log/block your queries"
+        verbose echo "     2. DNS queries may NOT be encrypted through tunnel"
+        verbose echo "     3. If VPN disconnects, DNS may leak to your ISP"
+    elif [ $has_tunnel_range_dns -eq 1 ]; then
+        verbose echo -e "   ${YELLOW}  POTENTIAL DNS IN TUNNEL RANGE DETECTED${NC}"
+        verbose echo ""
+        verbose echo "   You're using a DNS server in a private/tunnel IP range."
+        verbose echo ""
+        verbose echo "   This typically means:"
+        verbose echo "     - The VPN provider runs their own DNS resolver"
+        verbose echo "     - OR you intentionally set it this way"
+        verbose echo ""
+        verbose echo -e "   ${YELLOW}Possible issues:${NC}"
+        verbose echo "     1. Provider might not have set a DNS via tunnel (DNS Fails)"
+        verbose echo "     2. Provider DNS may log/block your queries"
+        verbose echo "     3. DNS queries may NOT be encrypted through tunnel"
+        verbose echo "     4. If VPN disconnects, DNS may leak to your ISP"
+    else
+        verbose echo -e "      ${YELLOW}Your actual DNS config:${NC}"
+        verbose echo "$dns_servers" | tr ',' '\n' | while IFS= read -r dns_entry; do
+            dns_entry=$(echo "$dns_entry" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -z "$dns_entry" ] && continue
+            verbose echo "         - $dns_entry"
+        done
+    fi
+    verbose echo ""
+    verbose echo -e "   ${YELLOW}Assuming you know what you're doing...${NC}"
+    verbose echo -e "      ${GREEN}Recommendations:${NC}"
+    verbose echo "        a) Use a trusted public DNS (1.1.1.1, 9.9.9.9). They WILL BE ALWAYS TUNNELED!"
+    verbose echo "        b) Run your own local DNS resolver (dnscrypt, unbound), and set it here NOW"
+    verbose echo "        c) Proceed using default DNS values from the .conf provider if you trust them"
+    verbose echo ""
+    verbose ui_lines 50
+    verbose echo ""
+}
 get_conf_value() {
     local key="$1"
     local file="$2"
@@ -106,11 +182,21 @@ validate_wg_config() {
     local config_file="$2"  # Solo para modo auto
     local field="$3"        # Campo a validar
     local value="$4"        # Valor a validar
-    debug_write "[VALIDATE] Validating $field: '$value'"
+    local test_mode="${5:-0}"
+    debug_write "[VALIDATE] Validating $field: '$value' (test_mode=$test_mode)"
+    _validate_error() {
+        local msg="$1"
+        if [ "$test_mode" = "1" ]; then
+            warning "VALIDATION ERROR!: $msg" >&2
+            return 1
+        else
+            error "$msg"
+        fi 
+    }
     case "$field" in
         DNS)
             if [ -z "$value" ]; then
-                debug_write "[VALIDATE] DNS empty, will use defaults"
+                debug_write "[VALIDATE] DNS empty, will use defaults ($DEFAULT_DNS)"
                 return 0
             fi
             local error_msg=""
@@ -125,43 +211,53 @@ validate_wg_config() {
                        [ "$2" -ge 0 -a "$2" -le 255 ] && \
                        [ "$3" -ge 0 -a "$3" -le 255 ] && \
                        [ "$4" -ge 0 -a "$4" -le 255 ]; then
-                        echo "valid"
+                            echo "valid"
                     else
-                        echo "ERROR: Invalid IPv4 DNS: $entry"
+                        error "ERROR: Invalid IPv4 DNS: $entry"
                         exit 1
                     fi
                 elif echo "$entry" | grep -qE '^[a-fA-F0-9:]+(:[a-fA-F0-9:]+)*$'; then
                     echo "valid"
                 else
-                    echo "ERROR: Invalid DNS format: $entry"
+                    _validate_error "ERROR: Invalid DNS format: $entry"
                     exit 1
                 fi
             done 2>&1)
             if echo "$error_msg" | grep -q "^ERROR:"; then
                 local err=$(echo "$error_msg" | grep "^ERROR:" | head -1 | sed 's/^ERROR: //')
-                error "$err"
+                _validate_error "$err"
+                return 1
             fi
             actual_count=$(echo "$error_msg" | grep -c "^valid$")
-            [ "$actual_count" -eq 0 ] && error "No valid DNS servers found"
+            if [ "$actual_count" -eq 0 ]; then
+                _validate_error "No valid DNS servers found!"
+                return 1
+            fi
             debug_write "[VALIDATE] DNS OK: $actual_count servers"
             return 0
             ;;
         AllowedIPs)
-            [ -z "$value" ] && error "AllowedIPs cannot be empty"
+            if [ -z "$value" ]; then
+                _validate_error "AllowedIPs cannot be empty"
+                return 1
+            fi
             local valid_count=$(echo "$value" | tr ',' '\n' | while IFS= read -r entry; do
                 entry=$(echo "$entry" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                 [ -z "$entry" ] && continue
                 if ! echo "$entry" | grep -q '/'; then
                     error "AllowedIPs entry missing CIDR: $entry"
+                    exit 1
                 fi
                 local ip_part=$(echo "$entry" | cut -d/ -f1)
                 local cidr_part=$(echo "$entry" | cut -d/ -f2)
                 if ! echo "$cidr_part" | grep -qE '^[0-9]+$'; then
                     error "Invalid CIDR in AllowedIPs: $cidr_part"
+                    exit 1
                 fi
                 if echo "$ip_part" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
                     if [ "$cidr_part" -lt 0 ] || [ "$cidr_part" -gt 32 ]; then
                         error "Invalid IPv4 CIDR: /$cidr_part"
+                        exit 1
                     fi
                     local IFS='.'
                     set -- $ip_part
@@ -169,24 +265,33 @@ validate_wg_config() {
                        [ "$2" -ge 0 -a "$2" -le 255 ] && \
                        [ "$3" -ge 0 -a "$3" -le 255 ] && \
                        [ "$4" -ge 0 -a "$4" -le 255 ]; then
-                        echo "valid"
+                            echo "valid"
                     else
                         error "Invalid IPv4 in AllowedIPs: $ip_part"
+                        exit 1
                     fi
                 elif echo "$ip_part" | grep -qE '^[a-fA-F0-9:]+(:[a-fA-F0-9:]+)*$'; then
                     if [ "$cidr_part" -lt 0 ] || [ "$cidr_part" -gt 128 ]; then
                         error "Invalid IPv6 CIDR: /$cidr_part"
+                        exit 1
                     fi
                     echo "valid"
                 else
                     error "Invalid AllowedIPs entry: $entry"
+                    exit 1
                 fi
             done | wc -l)
-            [ "$valid_count" -eq 0 ] && error "No valid AllowedIPs found"
+            if [ "$valid_count" -eq 0 ]; then
+                _validate_error "No valid AllowedIPs found"
+                return 1
+            fi
             debug_write "[VALIDATE] AllowedIPs OK: $valid_count entries"
             ;;
         Endpoint)
-            [ -z "$value" ] && error "Endpoint cannot be empty"
+            if [ -z "$value" ]; then 
+                _validate_error "Endpoint cannot be empty"
+                return 1
+            fi
             local host_part 
             local port_part
             if echo "$value" | grep -q '^\[.*\]:'; then
@@ -196,78 +301,128 @@ validate_wg_config() {
                 host_part=$(echo "$value" | cut -d: -f1)
                 port_part=$(echo "$value" | cut -d: -f2)
             fi
-            [ -z "$host_part" ] && error "Endpoint host cannot be empty"
-            [ -z "$port_part" ] && port_part="$DEFAULT_PORT"
+            if [ -z "$host_part" ]; then
+                _validate_error "Endpoint host cannot be empty"
+                return 1
+            fi
+            if [ -z "$port_part" ]; then
+                debug_write "[VALIDATION] No ENDPOINT:PORT found"
+                port_part="$DEFAULT_PORT"
+            fi
             if echo "$host_part" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
                 local IFS='.'
                 set -- $host_part
-                [ "$1" -ge 0 -a "$1" -le 255 ] && \
-                [ "$2" -ge 0 -a "$2" -le 255 ] && \
-                [ "$3" -ge 0 -a "$3" -le 255 ] && \
-                [ "$4" -ge 0 -a "$4" -le 255 ] || error "Invalid IPv4 endpoint: $host_part"
+                if ! [ "$1" -ge 0 -a "$1" -le 255 ] || \
+                    ! [ "$2" -ge 0 -a "$2" -le 255 ] || \
+                    ! [ "$3" -ge 0 -a "$3" -le 255 ] || \
+                    ! [ "$4" -ge 0 -a "$4" -le 255 ]; then
+                    _validate_error "Invalid IPv4 endpoint: $host_part"
+                    return 1
+                fi
             elif echo "$host_part" | grep -qE '^[a-fA-F0-9:]+(:[a-fA-F0-9:]+)*$'; then
                 : 
             elif echo "$host_part" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'; then
-                [ ${#host_part} -gt 253 ] && error "Hostname too long: $host_part"
+                if [ ${#host_part} -gt 253 ]; then 
+                    _validate_error "Hostname too long: $host_part"
+                    return 1
+                fi
             else
-                error "Invalid endpoint host: $host_part"
+                _validate_error "Invalid endpoint host: $host_part"
+                return 1
             fi
             if ! echo "$port_part" | grep -qE '^[0-9]+$'; then
-                error "Invalid endpoint port: $port_part"
+                _validate_error "Invalid endpoint port: $port_part"
+                return 1
             fi
-            [ "$port_part" -lt 1 -o "$port_part" -gt 65535 ] && error "Port out of range: $port_part"
+            if [ "$port_part" -lt 1 -o "$port_part" -gt 65535 ]; then
+                _validate_error "Port out of range: $port_part"
+                return 1
+            fi
             debug_write "[VALIDATE] Endpoint OK: $host_part:$port_part"
             ;;
         PrivateKey|PublicKey)
-            [ -z "$value" ] && error "$field cannot be empty"
+            if [ -z "$value" ]; then
+                _validate_error "$field cannot be empty"
+                return 1
+            fi
             local clean_key=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
             local key_len=${#clean_key}
-            [ $key_len -lt 43 -o $key_len -gt 44 ] && \
-                error "Invalid $field length: $key_len (expected 43-44 chars)"
-            echo "$clean_key" | grep -qE '^[A-Za-z0-9+/]+=*$' || \
-                error "Invalid $field format (not valid base64)"
+            if [ $key_len -lt 43 -o $key_len -gt 44 ]; then
+                _validate_error "Invalid $field length: $key_len (expected 43-44 chars)"
+                return 1
+            fi
+            if ! echo "$clean_key" | grep -qE '^[A-Za-z0-9+/]+=*$'; then
+                _validate_error "Invalid $field format (not valid base64)"
+                return 1
+            fi
             debug_write "[VALIDATE] $field OK"
             ;;
         Address)
-            [ -z "$value" ] && error "Address cannot be empty"
+            if [ -z "$value" ]; then
+                _validate_error "Address cannot be empty"
+                return 1
+            fi
             if ! echo "$value" | grep -q '/'; then
-                error "Address missing CIDR: $value"
+                _validate_error "Address missing CIDR: $value"
+                return 1
             fi
             local ip_part=$(echo "$value" | cut -d/ -f1)
             local cidr_part=$(echo "$value" | cut -d/ -f2)
             if ! echo "$cidr_part" | grep -qE '^[0-9]+$'; then
-                error "Invalid CIDR in Address: $cidr_part"
+                _validate_error "Invalid CIDR in Address: $cidr_part"
+                return 1
             fi
             if echo "$ip_part" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
-                [ "$cidr_part" -lt 0 -o "$cidr_part" -gt 32 ] && \
-                    error "Invalid IPv4 CIDR: /$cidr_part"
+                if [ "$cidr_part" -lt 0 -o "$cidr_part" -gt 32 ]; then
+                    _validate_error "Invalid IPv4 CIDR: /$cidr_part"
+                    return 1
+                fi
                 local IFS='.'
                 set -- $ip_part
-                [ "$1" -ge 0 -a "$1" -le 255 ] && \
-                [ "$2" -ge 0 -a "$2" -le 255 ] && \
-                [ "$3" -ge 0 -a "$3" -le 255 ] && \
-                [ "$4" -ge 0 -a "$4" -le 255 ] || error "Invalid IPv4 address: $ip_part"
+                if ! [ "$1" -ge 0 -a "$1" -le 255 ] || \
+                ! [ "$2" -ge 0 -a "$2" -le 255 ] || \
+                ! [ "$3" -ge 0 -a "$3" -le 255 ] || \
+                ! [ "$4" -ge 0 -a "$4" -le 255 ]; then
+                    _validate_error "Invalid IPv4 address: $ip_part"
+                    return 1
+                fi
             elif echo "$ip_part" | grep -qE '^[a-fA-F0-9:]+(:[a-fA-F0-9:]+)*$'; then
-                [ "$cidr_part" -lt 0 -o "$cidr_part" -gt 128 ] && \
-                    error "Invalid IPv6 CIDR: /$cidr_part"
+                if [ "$cidr_part" -lt 0 -o "$cidr_part" -gt 128 ]; then
+                    _validate_error "Invalid IPv6 CIDR: /$cidr_part"
+                    return 1
+                fi
             else
-                error "Invalid Address format: $value"
+                _validate_error "Invalid Address format: $value"
+                return 1
             fi
             debug_write "[VALIDATE] Address OK: $value"
             ;;
         InterfaceName)
-            [ -z "$value" ] && error "Interface name cannot be empty"
-            echo "$value" | grep -q '^wg' || \
-                error "Interface name must start with 'wg': $value"
-            [ ${#value} -gt 15 ] && \
-                error "Interface name too long: $value (max 15 chars)"
-            echo "$value" | grep -qE '^wg[a-zA-Z0-9_\-]+$' || \
-                error "Invalid interface name: $value (only letters, numbers, _, -)"
-            [ "$value" = "wg" ] && error "Interface name cannot be just 'wg'"
+            if [ -z "$value" ]; then
+                _validate_error "Interface name cannot be empty"
+                return 1
+            fi
+            if ! echo "$value" | grep -q '^wg'; then
+                _validate_error "Interface name must start with 'wg': $value"
+                return 1
+            fi
+            if [ ${#value} -gt 15 ]; then
+                _validate_error "Interface name too long: $value (max 15 chars)"
+                return 1
+            fi
+            if ! echo "$value" | grep -qE '^wg[a-zA-Z0-9_\-]+$'; then
+                _validate_error "Invalid interface name: $value (only letters, numbers, _, -)"
+                return 1
+            fi
+            if [ "$value" = "wg" ]; then
+                _validate_error "Interface name cannot be just 'wg'"
+                return 1
+            fi
             debug_write "[VALIDATE] InterfaceName OK: $value"
             ;;
         *)
-            error "Unknown validation field: $field"
+            _validate_error "Unknown validation field: $field"
+            return 1
             ;;
     esac
     return 0
@@ -450,6 +605,7 @@ show_header() {
     echo ""
 }
 show_usage() {
+    echo ""
     ui_lines 80 "${GREEN}WireGuard Auto-Config${NC} - ${RED}$VERSION${NC} HELP"
     echo ""
     echo -e "${GREEN}Configuration Management:${NC}"
@@ -514,7 +670,7 @@ list_configs() {
         return
     fi
     echo ""
-    ui_lines 49 "${YELLOW}Configs found on${NC} $WG_CONF_DIR"
+    ui_lines 49 "${YELLOW}Config files found on ${GREEN}$WG_CONF_DIR${NC}"
     echo ""
     local count=0
     local line=""
@@ -531,7 +687,7 @@ list_configs() {
             if [ $count -eq 0 ]; then
                 line="   $name"
             else
-                line="$line | $name"
+                line="$line ${NC}|${GREEN} $name${NC}"
             fi
             count=$((count + 1))
         fi
@@ -545,7 +701,7 @@ list_configs() {
     ui_lines 50
 }
 list_configs_full() {
-    ui_lines 49 "${YELLOW} Full Configs Inspection${NC}"
+    ui_lines 79 "${YELLOW} Full Configs Inspection${NC}"
     echo ""
     local found=0
     for conf in "$WG_CONF_DIR"/*.conf; do
@@ -557,41 +713,137 @@ list_configs_full() {
     done
     if [ $found -eq 0 ]; then
         warning "No configuration files found in $WG_CONF_DIR"
-        ui_lines 50
-    else
-        ui_lines 50
     fi
+    ui_lines 80
 }
 test_config() {
     local CONF_NAME="$1"
     local conf_file="$WG_CONF_DIR/$CONF_NAME.conf"
-    [ -f "$conf_file" ] || error " $conf_file does not exist!"
-    log "Testing $CONF_NAME.conf..."
-    verbose log "PENDING ADD VERBOSE INFO ABOUT KEY VALID STEPS"
-    private_key_raw=$(get_conf_value "PrivateKey" "$conf_file")
-    public_key_raw=$(get_conf_value "PublicKey" "$conf_file")
-    [ -z "$private_key_raw" ] && error "PrivateKey NOT FOUND!"
-    [ -z "$public_key_raw" ] && error "PublicKey NOT FOUND!"
-    private_key_clean=$(clean_wg_key "$private_key_raw")
-    public_key_clean=$(clean_wg_key "$public_key_raw")
+    [ -f "$conf_file" ] || error "Configuration file ${YELLOW}$conf_file${NC} not found!"
+    verbose echo ""
+    verbose log "Testing ${YELLOW}$CONF_NAME${NC} ..."
     echo ""
-    ui_lines 49 "${YELLOW}Key Validation${NC}"
-    echo "  Private Key: $private_key_clean"
-    echo "  Public Key: $public_key_clean"
+    ui_lines 79 "${YELLOW}FULL CONFIGURATION VALIDATION${NC}"
     echo ""
-    echo "   Testing wg keys ..."
+    local required_fields="PrivateKey PublicKey Address Endpoint AllowedIPs"
+    local optional_fields="DNS"
+    local all_ok=1
+    for field in $required_fields; do
+        local value=$(get_conf_value "$field" "$conf_file" "raw")
+        if [ -z "$value" ]; then
+            echo -e "  ${RED}[ERROR]${NC}  [MISSING] $field: NOT FOUND" >&2
+            all_ok=0
+        else
+            local validation_output=""
+            validation_output=$(validate_wg_config "auto" "$conf_file" "$field" "$value" "1" 2>&1)
+            local validation_exit=$?
+            if [ $validation_exit -eq 0 ]; then
+                success "  $field: ${GREEN}Valid${NC}"
+                local display_value="$value"
+                [ ${#display_value} -gt 50 ] && display_value="${display_value:0:47}..."
+                echo -e "        ${BLUE}Value:${NC} $display_value"
+            else
+                echo -e "  ${RED}[INVALID]${NC} $field: Failed Validation!"
+                if [ -n "$validation_output" ]; then
+                    local error_msg=$(echo "$validation_output" | grep -o "VALIDATION_ERROR: .*" | sed 's/VALIDATION_ERROR: //' | head -1)
+                    [ -n "$error_msg" ] && echo -e "        ${RED}Error:${NC} $error_msg"
+                fi
+                all_ok=0
+            fi
+        fi
+        echo ""
+    done
+    for field in $optional_fields; do
+        local value=$(get_conf_value "$field" "$conf_file" "raw")
+        if [ -z "$value" ]; then
+            warning "  [OPTIONAL] $field: Not specified (will use defaults)"
+        else
+            local validation_output=""
+            validation_output=$(validate_wg_config "auto" "$conf_file" "$field" "$value" "1" 2>&1)
+            local validation_exit=$?
+            if [ $validation_exit -eq 0 ]; then
+                success "  $field: ${GREEN}Valid${NC}"
+                local display_value="$value"
+                [ ${#display_value} -gt 50 ] && display_value="${display_value:0:47}..."
+                echo -e "        ${BLUE}Value:${NC} $display_value"
+            else
+                echo -e "  ${RED}[INVALID]${NC} $field: Failed Validation!"
+                if [ -n "$validation_output" ]; then
+                    local error_msg=$(echo "$validation_output" | grep -o "VALIDATION_ERROR: .*" | sed 's/VALIDATION_ERROR: //' | head -1)
+                    [ -n "$error_msg" ] && echo -e "        ${RED}Error:${NC} $error_msg"
+                fi
+                all_ok=0
+            fi
+        fi
+        echo ""
+    done
     echo ""
-    if echo "$private_key_clean" | wg pubkey >/dev/null 2>&1; then
-        success "VALID PrivateKey!"
-    else
-        error "Private key IS NOT VALID!!!"
+    ui_lines 49 "${YELLOW}KEY CRYPTO VALIDATION${NC}"
+    echo ""
+    local private_key_raw=$(get_conf_value "PrivateKey" "$conf_file" "raw")
+    local public_key_raw=$(get_conf_value "PublicKey" "$conf_file" "raw")
+    if [ -n "$private_key_raw" ]; then
+        local private_key_clean=$(clean_wg_key "$private_key_raw")
+        if echo "$private_key_clean" | wg pubkey >/dev/null 2>&1; then
+            success "  PrivateKey: ${GREEN}Cryptographically valid${NC}"
+            echo -e "        ${BLUE}Key:${NC} $(echo "$private_key_clean" | cut -c1-15)..."
+        else
+            echo -e "  ${RED}[INVALID]${NC} PrivateKey: ${RED}Not a valid WireGuard key!${NC}"
+            all_ok=0
+        fi
     fi
-    if echo "$public_key_clean" | wg pubkey >/dev/null 2>&1; then
-        success "VALID PublicKey!"
-    else
-        error "Public key IS NOT VALID!!!"
+    if [ -n "$public_key_raw" ]; then
+        local public_key_clean=$(clean_wg_key "$public_key_raw")
+        if echo "$public_key_clean" | wg pubkey >/dev/null 2>&1; then
+            success "  PublicKey: ${GREEN}Cryptographically valid${NC}"
+            echo -e "        ${BLUE}Key:${NC} $(echo "$public_key_clean" | cut -c1-15)..."
+        else
+            echo -e "  ${RED}[INVALID]${NC} PublicKey: ${RED}Not a valid WireGuard key!${NC}"
+            all_ok=0
+        fi
     fi
-    ui_lines 50
+    echo ""
+    ui_lines 49 "${YELLOW}ENDPOINT DETAILS${NC}"
+    echo ""
+    local endpoint=$(get_conf_value "Endpoint" "$conf_file" "raw")
+    if [ -n "$endpoint" ]; then
+        local host_part=$(echo "$endpoint" | cut -d: -f1)
+        local port_part=$(echo "$endpoint" | cut -d: -f2)
+        [ -z "$port_part" ] && port_part="$DEFAULT_PORT"
+        echo -e "  ${YELLOW}Host: ${GREEN}$host_part${NC}"
+        echo -e "  ${YELLOW}Port: ${GREEN}$port_part${NC}"
+        if ! echo "$host_part" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && \
+           ! echo "$host_part" | grep -qE '^\[.*\]$'; then
+            verbose echo ""
+            verbose warning "  [NOTE] Hostname detected: $host_part"
+            verbose echo ""
+            if nslookup "$host_part" >/dev/null 2>&1; then
+                echo ""
+                success "  ${GREEN}Hostname resolves correctly!${NC}"
+            else
+                echo ""
+                warning "  ${RED}Hostname does not resolve (may cause connection issues)!${NC}"
+                all_ok=0
+            fi
+        fi
+    fi
+    echo ""
+    ui_lines 49 "${YELLOW}TEST RESULTS${NC}"
+    if [ $all_ok -eq 1 ]; then
+        echo ""
+        success "${GREEN}CONFIGURATION FILE IS VALID AND READY FOR USE!${NC}"
+        echo ""
+        echo -e "   ${BLUE}You can now use:${NC}"
+        echo -e "     ${YELLOW}wg-autoconf setup ${GREEN}$CONF_NAME${NC}"
+        echo ""
+    else
+        echo ""
+        warning "${RED}CONFIGURATION FILE HAS ERRORS!${NC}"
+        echo ""
+        echo -e " ${YELLOW}Please fix the issues above before using this configuration!${NC}"
+        echo ""
+    fi
+    ui_lines 80
 }
 setup_network_config() {
     local iface_name="$1"
@@ -862,10 +1114,12 @@ setup_wireguard() {
         dns=$(get_conf_value "DNS" "$conf_file" "raw")
         if [ -n "$dns" ]; then
             validate_config_value "DNS" "$dns" "auto"
+            dns_leakage "$dns" "$address" "setup"
         else
             dns="$DEFAULT_DNS"
             warning "DNS not found, using defaults ("${DEFAULT_DNS}")"
             verbose log "Even using defaults, DNS will be tunneled in any case"
+            dns_leakage "$dns" "$address" "setup"
         fi
         debug_write "[SETUP AUTO] Configuration validated successfully"
         endpoint_host=$(echo "$endpoint" | cut -d: -f1)
@@ -1030,27 +1284,38 @@ setup_wireguard() {
         echo ""
         ui_lines 79 "${YELLOW}6. DNS SERVERS${NC}"
         echo -e "\033[1m   (use COMMA-SEPARATED values, e.g.: 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111)\033[0m"
+        local default_dns=""
+        if [ -n "$conf_file" ] && [ -f "$conf_file" ]; then
+            default_dns=$(get_conf_value "DNS" "$conf_file" "raw")
+        fi
+        [ -z "$default_dns" ] && default_dns="$DEFAULT_DNS"
         while true; do
-            read -p "Enter DNS servers: " dns_input
-            [ -z "$dns_input" ] && dns_input="$DEFAULT_DNS"
-            if validate_wg_config "manual" "" "DNS" "$dns_input" 2>/dev/null; then
-                dns="$dns_input"
+            read -p "Enter DNS servers (default: $default_dns) " dns_input
+            if [ -z "$dns_input" ]; then
+                dns="$default_dns"
+                verbose echo -e "${GREEN}Using default DNS: $default_dns${NC}"
                 break
             else
-                warning "Invalid DNS format. Please try again."
+                if validate_wg_config "manual" "" "DNS" "$dns_input" 2>/dev/null; then
+                    dns="$dns_input"   
+                    break
+                else
+                    warning "Invalid DNS format. Please try again."
+                fi
             fi
         done
+        dns_leakage "$dns" "$address" "manual"
         echo ""
         ui_lines 79 "${YELLOW}7. SAVE WIREGUARD CONFIGURATION FILE${NC}"
         echo ""
         ui_lines 50 "CONFIG SUMMARY"
-        echo "Interface:           $iface_name"
-        echo "Private Key:         $(echo $private_key | cut -c1-10)..."
-        echo "Public Key:          $(echo $public_key | cut -c1-10)..."
-        echo "Local IP:            $address"
-        echo "Endpoint:            $endpoint_host:$endpoint_port"
-        echo "Allowed IPs:         $allowed_ips"
-        echo "DNS:                 $dns"
+        echo -e "Interface:           $iface_name"
+        echo -e "Private Key:         $(echo $private_key | cut -c1-10)..."
+        echo -e "Public Key:          $(echo $public_key | cut -c1-10)..."
+        echo -e "Local IP:            $address"
+        echo -e "Endpoint:            $endpoint_host:$endpoint_port"
+        echo -e "Allowed IPs:         $allowed_ips"
+        echo -e "DNS:                 $dns"
         ui_lines 50
         echo ""
         read -p "Save config as .conf file in $WG_CONF_DIR? (y/N): " save_conf
@@ -1310,7 +1575,7 @@ remove_wireguard() {
         [ "$silent" != "silent" ] && success "$iface removed (was not in UCI)"
         return 0
     fi
-    [ "$silent" != "silent" ] && log "Removing $iface..."
+    [ "$silent" != "silent" ] && verbose log "Removing $iface..."
     debug_write "[REMOVE] Deactivating interface: $iface"
     ifdown "$iface" 2>/dev/null
     if [ $? -ne 0 ]; then
@@ -1360,11 +1625,6 @@ remove_wireguard() {
             debug_write "[REMOVE WARNING] Invalid or missing firewall tag for $iface"
         fi
     fi
-    debug_write "[REMOVE] Committing UCI changes"
-    verbose log "Applying changes..."
-    uci commit network 2>/dev/null && debug_write "[REMOVE] network committed"
-    uci commit dhcp 2>/dev/null && debug_write "[REMOVE] dhcp committed"
-    uci commit firewall 2>/dev/null && debug_write "[REMOVE] firewall committed"
     local should_restore_backups=0
     local remaining_ifaces=$(get_all_wg_interfaces)
     local remaining_count=0
@@ -1387,13 +1647,13 @@ remove_wireguard() {
         debug_write "[REMOVE] Restoring backups ..."
         if restore_backups "" "$restore_silent"; then
             debug_write "[REMOVE] Backups restored successfully using restore_backups()"
-            [ "$silent" != "silent" ] && success "Configuration files restored from backup"
+            [ "$silent" != "silent" ] && verbose success "Configuration files restored from backup"
             restore_result=1
         else
             debug_write "[REMOVE WARNING] Backup restoration had issues or no backups to restore"
             if [ "$silent" != "silent" ]; then
                 warning "No valid backups found or restoration had issues"
-                warning "Original configuration files may have been modified"
+                warning "BAckuped configuration files may have been modified"
             fi
             restore_result=0
         fi
@@ -1401,13 +1661,13 @@ remove_wireguard() {
         debug_write "[REMOVE] Skipping backup restoration (other interfaces exist)"
         cleanup_backup_files ""
     fi
-    if [ $restore_result -eq 1 ]; then
-        debug_write "[REMOVE] Final UCI commit after backup restoration"
-        uci commit network 2>/dev/null
-        uci commit dhcp 2>/dev/null
-        uci commit firewall 2>/dev/null
-        /etc/init.d/firewall reload 2>/dev/null && debug_write "[REMOVE INIT.D] Firewall reloaded"
-    fi
+    debug_write "[REMOVE] Committing UCI changes"
+    verbose log "Applying changes..."
+    uci commit network 2>/dev/null && debug_write "[REMOVE] network committed"
+    uci commit dhcp 2>/dev/null && debug_write "[REMOVE] dhcp committed"
+    uci commit firewall 2>/dev/null && debug_write "[REMOVE] firewall committed"
+    /etc/init.d/network reload 2>/dev/null && debug_write "[REMOVE] INIT.D/network reloaded"
+    /etc/init.d/firewall reload 2>/dev/null && debug_write "[REMOVE] INIT.D/firewall reloaded"
     if [ $restore_result -eq 1 ]; then
         debug_write "[REMOVE] Cleaning up restored backup files"
         local removed_backups=0
@@ -1446,12 +1706,11 @@ remove_wireguard() {
     fi
     debug_write "[REMOVE] Completed: restore_result=$restore_result, remaining_ifaces=$remaining_count"
     if [ "$silent" != "silent" ]; then
-        echo ""
-        success "$iface removed successfully!"
+        verbose success "$iface removed successfully!"
         if [ "$should_restore_backups" -eq 1 ] && [ $restore_result -eq 1 ]; then
-            echo -e "${GREEN}Configuration restored from backups${NC}"
+            verbose echo -e "${GREEN}Configuration restored from backups${NC}"
         elif [ "$should_restore_backups" -eq 0 ]; then
-            echo -e "${YELLOW}Backups preserved (other interfaces exist)${NC}"
+            log -e "${YELLOW}Backups preserved (as other interfaces exist!)${NC}"
         fi
     fi
     return 0
@@ -1459,34 +1718,92 @@ remove_wireguard() {
 show_status() {
     local filter_iface="$1"
     upgrade_avoid_garbage
-    log "WireGuard status:"
+    state_init 2>/dev/null
     echo ""
-    local interfaces=$(wg show interfaces 2>/dev/null)
-    if [ -z "$interfaces" ]; then
-        echo "No active WireGuard interfaces found"
+    ui_lines 59 "${YELLOW}WireGuard Status${NC}"
+    echo ""
+    verbose log "Interface and config overview: "
+    verbose echo -e "  Check connection status (Created or not, UP/DOWN/routed, Orphaned status), "
+    verbose echo -e "  and verify if valid backups of your original configuration exist."
+    verbose echo ""
+    local all_interfaces=""
+    local uci_ifaces=$(get_all_wg_interfaces)
+    local active_ifaces=$(wg show interfaces 2>/dev/null)
+    all_interfaces=$(echo "$uci_ifaces $active_ifaces" | tr ' ' '\n' | sort -u)
+    if [ -z "$all_interfaces" ]; then
+        log "No WireGuard interfaces found"
         return
     fi
-    for iface in $interfaces; do
-        if [ -n "$filter_iface" ] && [ "$iface" != "$filter_iface" ]; then
-            continue
-        fi
-        echo "$iface"
-        local address=$(uci get "network.$iface.addresses" 2>/dev/null || echo "N/A")
-        echo "  IP: $address"
-        if ip link show "$iface" >/dev/null 2>&1; then
-            echo "  Status: UP"
-            local peer_info=$(wg show "$iface" 2>/dev/null)
-            local endpoint=$(echo "$peer_info" | grep "endpoint:" | head -1)
-            [ -n "$endpoint" ] && echo "  $endpoint"
-            local handshake=$(echo "$peer_info" | grep "latest handshake:" | head -1)
-            [ -n "$handshake" ] && echo "  $handshake"
-            local transfer=$(echo "$peer_info" | grep "transfer:" | head -1)
-            [ -n "$transfer" ] && echo "  $transfer"
+    for iface in $all_interfaces; do
+        [ -n "$filter_iface" ] && [ "$iface" != "$filter_iface" ] && continue
+        local status_tags=""
+        local details=""
+        if uci get "network.$iface" >/dev/null 2>&1; then
+            status_tags="${status_tags}${GREEN}CREATED${NC}"
+            local address=$(uci get "network.$iface.addresses" 2>/dev/null || echo -e "${RED}N/A${NC}")
+            local endpoint_host=$(uci get "network.${iface}_peer.endpoint_host" 2>/dev/null)
+            local endpoint_port=$(uci get "network.${iface}_peer.endpoint_port" 2>/dev/null)
+            details="  ${YELLOW}Local:      ${GREEN}$address${NC}\n"
+            [ -n "$endpoint_host" ] && details="${details}  ${YELLOW}Endpoint:   ${GREEN}${endpoint_host}:${endpoint_port:-51820}${NC}\n"
         else
-            echo "  Status: DOWN"
+            debug_write "[INFO] Found ORPHANED configs! "    
+            status_tags="${status_tags}${RED}ORPHANED${NC}"
+            details="  ${YELLOW}Status:   ${RED}Active interface without UCI configuration${NC}\n"
         fi
+        if ip link show "$iface" >/dev/null 2>&1; then
+            status_tags="${status_tags}, ${GREEN}UP${NC}"
+            local peer_info=$(wg show "$iface" 2>/dev/null)
+            local endpoint=$(echo "$peer_info" | grep "endpoint:" | head -1 | sed 's/endpoint: //')
+            local handshake=$(echo "$peer_info" | grep "latest handshake:" | head -1 | sed 's/latest handshake: //')
+            local transfer=$(echo "$peer_info" | grep "transfer:" | head -1 | sed 's/transfer: //')
+            [ -n "$endpoint" ] && [ -z "$endpoint_host" ] && details="${details}  ${YELLOW}Endpoint: ${GREEN}$endpoint${NC}\n"
+            [ -n "$handshake" ] && details="${details}  ${YELLOW}Last HS:  ${GREEN}$handshake${NC}\n"
+            [ -n "$transfer" ] && details="${details}  ${YELLOW}Transfer: ${GREEN}$transfer${NC}\n"
+        else
+            status_tags="${status_tags}, ${RED}DOWN${NC}"
+            details="${details}  ${YELLOW}Status:     Interface configured but not active${NC}\n"
+        fi
+        local rt_tables=$(grep "_vpn_${iface}_" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
+        if [ -n "$rt_tables" ]; then
+            status_tags="${status_tags}, ${YELLOW}ROUTED${NC}"
+            details="${details}  ${YELLOW}Routes:${NC}     "
+            for table in $rt_tables; do
+                local lan_iface=$(echo "$table" | sed "s/_vpn_${iface}_//")
+                details="${details}$lan_iface "
+            done
+            details="${GREEN}${details} ${BLUE}(via ${rt_tables%% *})${NC}\n"
+        fi
+        local backup_status=""
+        local backup_count=0
+        local valid_count=0
+        for config in network dhcp firewall; do
+            local backup_file="/etc/config/${config}.BACKUP_PRE_WIREGUARD"
+            if [ -f "$backup_file" ]; then
+                backup_count=$((backup_count + 1))
+                if validate_backup "$backup_file" 2>/dev/null; then
+                    valid_count=$((valid_count + 1))
+                fi
+            fi
+        done
+        if [ $backup_count -gt 0 ]; then
+            if [ $valid_count -eq $backup_count ]; then
+                backup_status="${GREEN}Valid${NC}"
+            elif [ $valid_count -eq 0 ]; then
+                debug_write "[INFO] Found CORRUPTED backups when checking WG status!" 
+                backup_status="${RED}Corrupted${NC}"
+            else
+                debug_write "[INFO] Missing some backups when checking WG status!"
+                backup_status="${YELLOW}Partial${NC}"
+            fi
+            details="${details}  ${YELLOW}Backups:${NC}    $backup_status"
+            [ $backup_count -eq 3 ] && details="${details} ${BLUE}(network, dhcp, firewall)${NC}"    
+            details="${details}\n"
+        fi
+        ui_lines 39 "${BLUE}$iface${NC} (${status_tags})"
+        printf "$details"
         echo ""
     done
+    ui_lines 60
 }
 backup_config_file() {
     local file="$1"
@@ -1594,12 +1911,16 @@ validate_backup() {
         debug_write ""
         error "No checksum found on $backup_file!"
         verbose warning "Backup file ($backup_file) may be corrupted/tampered!"
-        verbose log "Did you edit a <file>.BACKUP_PRE_WIREGUARD file?"
-        verbose log "  Please, avoid editing backup file as the best method to fully restore"
-        verbose log "  a native configuration is by using Clean/Nuke/Restore methods"
+        echo ""
+        echo -e "   ${YELLOW}Did you edit <${GREEN}$backup_file${YELLOW}> file?${NC}"
+        verbose echo -e "   Please, ${RED}AVOID${NC} modifying backup files directly!"
+        verbose echo ""
+        verbose echo -e "   To ensure a reliable restore/cleanup, use the built-in methods:"
+        verbose echo -e "      ${YELLOW}wg-autoconf clean (for a single interface)${NC}"
+        verbose echo -e "      ${YELLOW}wg-autocong ${RED}nuke ${YELLOW}(for any WG interface/connection)${NC}"
         return 1
     fi
-    debug_write "[BACKUP VALIDATE] Stored checksum: ${stored_sum:0:16}..."
+    debug_write "[BACKUP VALIDATE] File: $backup_file | Stored checksum: ${stored_sum}..."
     local computed_sum=""
     local total_lines=$line_count
     local content_lines=$((total_lines - 2))
@@ -1609,25 +1930,31 @@ validate_backup() {
     fi
     if command -v sha256sum >/dev/null 2>&1; then
         computed_sum=$(head -n $((total_lines - 1)) "$backup_file" | tail -n +2 | sha256sum | cut -d' ' -f1)
-    else
-        computed_sum=$(head -n $((total_lines - 1)) "$backup_file" | tail -n +2 | md5sum | cut -d' ' -f1)
     fi
     if [ -z "$computed_sum" ]; then
         debug_write "[BACKUP VALIDATE ERROR] Failed to compute checksum!"
         return 1
     fi
-    debug_write "[BACKUP VALIDATE] Computed checksum: ${computed_sum:0:16}..."
+    debug_write "[BACKUP VALIDATE] Computed checksum: ${computed_sum}..."
     if [ "$stored_sum" = "$computed_sum" ]; then
-        debug_write "[BACKUP VALIDATE] VALID backup: $backup_file"
+        debug_write "[BACKUP VALIDATE] File: $backup_file | Computed checksum: ${stored_sum}"
         return 0
     else
         debug_write "[BACKUP VALIDATE] CHECKSUM MISMATCH: $backup_file"
-        debug_write "[BACKUP VALIDATE] Stored: ${stored_sum:0:16}..."
-        debug_write "[BACKUP VALIDATE] Computed: ${computed_sum:0:16}..."
-        warning "Backup file ($backup_file) may be corrupted/tampered!"
-        verbose log "Did you edit a <file>.BACKUP_PRE_WIREGUARD file?"
-        verbose log "  Please, avoid editing backup file as the best method to fully restore"
-        verbose log "  a native configuration is by using Clean/Nuke/Restore methods"
+        debug_write "   Stored:   ${stored_sum}"
+        debug_write "   Computed: ${computed_sum}"
+        verbose ui_lines 79 "${RED}Backup file ${YELLOW}($backup_file) ${RED}may be corrupted/tampered!${NC}"
+        verbose echo ""
+        verbose echo -e "     ${YELLOW}Did you edit <${GREEN}$backup_file${YELLOW}> file?${NC}"
+        verbose echo ""
+        verbose echo -e "       Please, ${RED}AVOID${NC} modifying backup files directly!"
+        verbose echo ""
+        verbose echo -e "       To ensure a reliable restore/cleanup, use the built-in methods:"
+        verbose echo -e "          ${YELLOW}wg-autoconf clean (for a single interface)${NC}"
+        verbose echo -e "          ${YELLOW}wg-autocong ${RED}nuke ${YELLOW}(for any WG interface/connection)${NC}"
+        verbose echo ""
+        verbose ui_lines 80
+        verbose echo ""
         return 1
     fi
 }
@@ -1643,13 +1970,14 @@ show_backups() {
             local backup_date=$(ls -l "$backup_file" | awk '{print $6" "$7" "$8}')
             local backup_tag=$(head -1 "$backup_file" | sed 's/^# //')
             if validate_backup "$backup_file"; then
-                success "$(basename $path) [VALID]"
+                success "${YELLOW}$(basename $path) ${GREEN}[VALID]${NC}"
             else
-                warning "$(basename $path) [CORRUPTED]"
+                debug_write "[BACKUPS SHOW] Found a corrupted backup file: $path"
+                warning "${YELLOW}$(basename $path) ${RED}[CORRUPTED]${NC}"
             fi
-            echo -e "      Path: ${YELLOW}$backup_file${NC}"
-            echo -e "      Tag:  ${YELLOW}$backup_tag${NC}"
-            echo -e "      Size: ${YELLOW}$backup_size${NC} | Date: ${YELLOW}$backup_date${NC}"
+            echo -e "      ${YELLOW}Path: ${GREEN}$backup_file${NC}"
+            echo -e "      ${YELLOW}Tag:  ${GREEN}$backup_tag${NC}"
+            echo -e "      ${YELLOW}Size: ${GREEN}$backup_size${NC} | ${YELLOW}Date: ${GREEN}$backup_date${NC}"
             echo ""
         fi
     done
@@ -1663,7 +1991,7 @@ restore_backups() {
     local file_to_restore="$1"
     local silent="${2:-}"
     debug_write "[RESTORE] Starting restore operation"
-    [ "$silent" != "silent" ] && log "Restoring backup files..."
+    [ "$silent" != "silent" ] && verbose log "Restoring backup files..."
     local restore_count=0
     local skip_count=0
     local corrupt_count=0
@@ -1710,7 +2038,7 @@ restore_backups() {
         [ -f "$temp_restore" ] && rm -f "$temp_restore" 2>/dev/null
         if [ $restore_ok -eq 1 ]; then
             restore_count=$((restore_count + 1))
-            [ "$silent" != "silent" ] && success "Restored $config_name from backup"
+            [ "$silent" != "silent" ] && verbose success "Restored $config_name from backup"
             debug_write "[RESTORE] Successfully restored: $config_name"
         else
             [ "$silent" != "silent" ] && warning "Failed to restore $config_name"
@@ -1723,7 +2051,7 @@ restore_backups() {
         uci commit dhcp 2>/dev/null && debug_write "[RESTORE] dhcp committed"
         uci commit firewall 2>/dev/null && debug_write "[RESTORE] firewall committed"
         /etc/init.d/firewall reload 2>/dev/null && debug_write "[RESTORE INIT.D] firewall reloaded"
-        [ "$silent" != "silent" ] && success "$restore_count file(s) restored successfully"
+        [ "$silent" != "silent" ] && verbose success "$restore_count file(s) restored successfully"
         debug_write "[RESTORE] Completed: restored=$restore_count, corrupted=$corrupt_count, errors=$error_count, skipped=$skip_count"
         return 0
     else
@@ -1743,40 +2071,54 @@ diagnose_backup_issue() {
     local config="$1"
     local backup="${config}.BACKUP_PRE_WIREGUARD"
     if [ ! -f "$backup" ]; then
-        echo "No backup found for $(basename "$config")"
+        warning  "No backup found for $(basename "$config")"
         return
     fi
-    ui_lines 79 "Diagnosing backup: $(basename "$backup")"
     echo ""
-    echo -e "${YELLOW}1. File structure:${NC}"
-    echo "   Total lines: $(wc -l < "$backup")"
-    echo "   Line 1 (tag): $(head -1 "$backup")"
-    echo "   Last line: $(tail -1 "$backup")"
+    ui_lines 79 "${YELLOW}Diagnosing backup: ${GREEN}$(basename "$backup")${NC}"
+    echo ""
+    echo -e "  ${YELLOW}1. File structure:${NC}"
+    echo -e "     Total lines:  ${GREEN}$(wc -l < "$backup")${NC}"
+    echo -e "     Line 1 (tag): ${GREEN}$(head -1 "$backup")${NC}"
+    echo -e "     Last line:    ${GREEN}$(tail -1 "$backup")${NC}"
     echo ""
     local stored_sum=$(tail -1 "$backup" | grep -o '[0-9a-f]\{64\}')
-    echo "${YELLOW}2. Stored checksum:${NC} $stored_sum"
+    echo -e "  ${YELLOW}2. Stored checksum: ${BLUE}$stored_sum${NC}"
     echo ""
     local total_lines=$(wc -l < "$backup")
     local computed_sum=$(head -n -1 "$backup" | tail -n +2 | sha256sum | cut -d' ' -f1)
-    echo "${YELLOW}3. Real checksum:${NC} $computed_sum"
-    echo ""
+    echo -e "  ${YELLOW}3. Real checksum:${NC}   ${BLUE}$computed_sum${NC}"
     if [ "$stored_sum" = "$computed_sum" ]; then
-        success "Backup is VALID"
-    else
-        error "Backup is INVALID"
         echo ""
-        echo "${YELLOW}5. Content analysis:${NC}"
+        ui_lines 79 "Backup is ${GREEN}VALID${NC}"
+    else
+        echo ""
+        warning "   Backup is ${RED}CORRUPTED${NC}!"
+        echo ""
+        echo -e "  ${YELLOW}4. Content analysis:${NC}"
         local content=$(head -n -1 "$backup" | tail -n +2)
-        echo "   Content lines: ${GREEN}$(echo "$content" | wc -l)${NC}"
-        echo "   Content bytes: ${GREEN}$(echo "$content" | wc -c)${NC}"
+        echo -e "   Content lines: ${GREEN}$(echo "$content" | wc -l)${NC}"
+        echo -e "   Content bytes: ${GREEN}$(echo "$content" | wc -c)${NC}"
         echo ""
         if [ -f "$config" ]; then
             local current_sum=$(cat "$config" | sha256sum | cut -d' ' -f1)
-            echo "${YELLOW}6. Current file checksum:${NC} $current_sum"
+            echo -e "  ${YELLOW}5. Current file checksum:${NC} $current_sum"
             if [ "$current_sum" = "$stored_sum" ]; then
                 success "Current file matches backup checksum"
             else
-                warning "Current file DIFFERS from backup!"
+                debug_write "[BACKUPS DIAG] Found CORRUPTED backup: $backup !"
+                echo ""
+                warning "Current file ${RED}DIFFERS${NC} from backup!"
+                verbose echo ""
+                verbose log "Original backup file have been modified unexpectedly! "
+                verbose echo -e "  ${YELLOW}Did you edit a backup file?${NC}"
+                verbose echo -e "  This should ${YELLOW}NOT${NC} have happened. Please review now each "
+                verbose echo -e "  configuration (network, firewall, dhcp) to ensure system integrity!"
+                verbose echo ""
+                verbose echo -e "  If you make changes, remember to ${YELLOW}COMMIT${NC} them by running:"
+                verbose echo -e "   ${YELLOW}uci commit network${NC}, ${YELLOW}uci commit dhcp${NC}, or ${YELLOW}uci commit firewall${NC}"
+                verbose echo ""
+                verbose ui_lines 80
             fi
         fi
     fi
@@ -1925,7 +2267,6 @@ cleanup() {
             debug_write "[CLEANUP INTERACTIVE] Selected interface: $interfaces"
             ;;
         nuke)
-            state_reset
             interfaces=$(get_all_wg_interfaces)
             interactive=0
             silent="silent"
