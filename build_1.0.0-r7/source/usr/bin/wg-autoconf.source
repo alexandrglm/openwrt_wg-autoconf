@@ -54,6 +54,7 @@ VERBOSE=0
 DEFAULT_DNS="1.1.1.1, 1.0.0.1"
 DEFAULT_PORT=51820
 DEFAULT_ALLOW_IPS="0.0.0.0/0"
+DEFAULT_TABLES="/etc/iproute2/rt_tables"
 
 #####################################################################
 #
@@ -119,7 +120,74 @@ ui_lines() {
     printf '\n'
 }
 
+#####################################################################
+# HANDLER -> RT_TABLES SAFETY
+#####################################################################
+rt_tables_health() {
 
+    if [ ! -f "$DEFAULT_TABLES" ] || ! grep -q "local" "$DEFAULT_TABLES"; then
+        
+        # DEBUG! 
+        debug_write "[ROUTE TABLES SAFETY] RT_TABLES file NOT FOUND! Trying a restoration. Please Check 'ip', reboot, perform a cleanup!"
+
+        warning "Routing tables file not found, attempting to create..."
+        warning "This is trully BIZARRE, please, pay attention:"
+        echo -e "   Your ${RED}/etc/iproute2/rt_tables${NC} is MISSING, and this SHOULD NOT be happening!"
+        echo -e "   To be safe, at this point, a new fully-compatible rt_tables file is being created"
+        echo -e "   Even this will work well, you may prefer to check your configs. and/or reboot the device"
+        echo ""
+        verbose log "The 'rt_tables' file is used by default by a ${YELLOW}CORE${NC} dependency included as standard in ALL OpenWRT builds (the 'ip' package)."        
+        verbose echo -e "   This is highly unusual for this file to be missing. 'wg-autoconf' has encountered this issue and, while it didn't cause the problem, ${GREEN}this issue can be fixed${NC}."        
+        verbose echo -e "   ${YELLOW}HOWEVER, just because it can be fixed temporarily doesn't mean the error won't happen again${NC}; it is up to you to find out what has happened with 'ip'/'rt_tables'"
+
+        
+        
+        mkdir -p /etc/iproute2 2>/dev/null
+
+        if {
+            echo "# rt_tables file restored by"
+            echo "#   wg-autoconf $VERSION "
+            echo "# Check your 'ip' package issues!"
+            echo "#"
+            echo "# reserved values"
+            echo "#"
+            echo "128     prelocal"
+            echo "255     local"
+            echo "254     main"
+            echo "253     default"
+            echo "0       unspec"
+            echo "#"
+            echo "# local"
+            echo "#"
+            echo "#1      inr.ruhep"
+        } > /etc/iproute2/rt_tables 2>/dev/null; then
+
+            debug_write "[ROUTE TABLES SAFETY] rt_tables RESTORED OK! "
+            echo ""
+            success " Route Tables succesfully restored! "
+            echo ""
+            
+            return 0
+
+        else
+
+            debug_write "[ROUTE TABLES SAFETY] ERROR restoring rt_tables! This is an IMPOSSIBLE error. Check filesystem corruption! Check /overlay corruption! REWRITE A NEW RT_TABLE FILE at $DEFAULT_TABLES !!! "
+
+            echo ""
+            warning "${RED}Route Tables couldn't be restored!${NC}"
+            echo ""
+
+            return 1
+        
+        fi
+
+    else
+
+        return 0
+    
+    fi
+
+}
 #####################################################################
 # HANDLER -> DNS LEAKAGE NOTICE
 #####################################################################
@@ -2120,17 +2188,18 @@ setup_wireguard() {
             debug_write "    (This is OK as wg-autoconf allows managing multiple WG setups!)"
             
             warning "Found previous setups!: "
+            echo ""
             echo -e "  - ${YELLOW}WG Interfaces:${NC}    $active_ifaces"
             echo ""
             verbose log "An active WireGuard interface or connection already exists"
             verbose echo "   You may continue configuring as many additional interfaces as required"
             verbose echo "   This notice is simply for your situational awareness"
-            echo ""
+            verbose echo ""
             
             verbose log "If you think there should be no pre-existing configuration, abort now and run 'wg-autoconf nuke' to ensure a clean slate"
             verbose echo ""
 
-            printf "${GREEN}Proceed with another WG setup? (y/${NC}${RED}N${NC}${GREEN}):${NC} "
+            printf "${YELLOW}Proceed with another WG setup? (${GREEN}Y${YELLOW}/${RED}n${YELLOW}):${NC} "
             read -r confirm
             case "$confirm" in
             
@@ -2255,7 +2324,8 @@ setup_wireguard() {
 
             # 1.1  SET IFACE 
             # DEBUG! r7 to-printf
-            read -p "Enter interface name (default: $default_iface): " iface_input
+            printf "Enter interface name (${BLUE}default: $default_iface)${NC}:"
+            read -r iface_input
             [ -z "$iface_input" ] && iface_input="$default_iface"
             
             # 1.1   IFACE VALIDATION
@@ -2272,7 +2342,8 @@ setup_wireguard() {
             
 
                 # DEBUG! r7 to-printf
-                read -p "Try another name? (y/N): " retry
+                printf "${YELLOW}Try another name? (${GREEN}Y${YELLOW}/${RED}n${YELLOW}):${NC} "
+                read -r retry
                 case "$retry" in
                     y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                         continue
@@ -2304,7 +2375,8 @@ setup_wireguard() {
             echo "   [From $conf_name.conf: $(echo $default_privkey | cut -c1-10)...]"
             
             # DEBUG! r7 to-printf
-            read -p "Enter PRIVATE key (press Enter to use default): " private_key_raw
+            printf "Enter PRIVATE key (${BLUE}or press Enter for default${NC}): "
+            read -r private_key_raw
             
             [ -z "$private_key_raw" ] && private_key_raw="$default_privkey"
         
@@ -2312,13 +2384,14 @@ setup_wireguard() {
         else
             
             # DEBUG! r7 to-printf
-            read -p "Enter PRIVATE key: " private_key_raw
+            printf "Enter PRIVATE key: "
+            read -r private_key_raw
         
         fi
-
-        [ -z "$private_key_raw" ] && error "Private key is required!"
         
         # 2.1.1 VALIDATE PRIVKEY
+        [ -z "$private_key_raw" ] && error "Private key is required!"
+
         validate_wg_config "manual" "" "PrivateKey" "$private_key_raw"
         private_key=$(clean_wg_key "$private_key_raw")
 
@@ -2335,21 +2408,22 @@ setup_wireguard() {
             echo "   [From $conf_name.conf: $(echo $default_pubkey | cut -c1-10)...]"
             
             # DEBUG! r7 to-printf
-            read -p "Enter PUBLIC key (press Enter to use default): " public_key_raw
+            printf "Enter PUBLIC key (${BLUE}or press Enter for default${NC}): "
+            read -r public_key_raw
         
             [ -z "$public_key_raw" ] && public_key_raw="$default_pubkey"
         
         else
             
             # DEBUG! r7 to-printf
-            read -p "Enter PUBLIC key: " public_key_raw
+            printf "Enter PUBLIC key: "
+            read -r public_key_raw
         
         fi
-
-        [ -z "$public_key_raw" ] && error "Public key is required!"
-       
-        
+    
         # 2.2.1 VALIDATE PUBKEY
+        [ -z "$public_key_raw" ] && error "Public key is required!"
+        
         validate_wg_config "manual" "" "PublicKey" "$public_key_raw"
         public_key=$(clean_wg_key "$public_key_raw")
 
@@ -2373,7 +2447,8 @@ setup_wireguard() {
             if [ -n "$default_address" ]; then
                 
                 # DEBUG! r7 to-printf
-                read -p "Enter local IP address (default: $default_address): " address_input
+                printf "Enter local IP address (${BLUE} default: $default_address${NC}): "
+                read -r address_input
               
                 [ -z "$address_input" ] && address_input="$default_address"
             
@@ -2381,7 +2456,8 @@ setup_wireguard() {
             else
                 
                 # DEBUG! r7 to-printf
-                read -p "Enter local IP address (e.g., 10.2.0.2/32): " address_input
+                printf "Enter local IP address (${BLUE}e.g., 10.2.0.2/32${NC}): "
+                read -r address_input
             
             fi
 
@@ -2398,7 +2474,8 @@ setup_wireguard() {
                 debug_write "[SETUP MANUAL] IP collision: $address_input"
         
                 # DEBUG! r7 to-printf
-                read -p "Try another address? (y/N): " retry
+                printf "${YELLOW}Try another address? (${GREEN}Y${YELLOW}/${RED}n${YELLOW}):${NC} "
+                read -r retry
                 case "$retry" in
                     y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                         continue
@@ -2442,14 +2519,16 @@ setup_wireguard() {
             if [ -n "$default_endpoint_host" ]; then
             
                 # DEBUG! r7 to-printf
-                read -p "Enter endpoint host (default: $default_endpoint_host): " endpoint_host_input
+                printf "Enter endpoint host (${BLUE}default: $default_endpoint_host${NC}): "
+                read -r endpoint_host_input
             
                 [ -z "$endpoint_host_input" ] && endpoint_host_input="$default_endpoint_host"
             
             else
             
                 # DEBUG! r7 to-printf
-                read -p "Enter endpoint host (IP or domain): " endpoint_host_input
+                printf "Enter endpoint host (IP or domain): "
+                read -r endpoint_host_input
             
             fi
 
@@ -2460,14 +2539,16 @@ setup_wireguard() {
             if [ -n "$default_endpoint_port" ]; then
                 
                 # DEBUG! r7 to-printf
-                read -p "Enter endpoint port (default: $default_endpoint_port): " endpoint_port_input
+                printf "Enter endpoint port (${BLUE}default: $default_endpoint_port${NC}): "
+                read -r endpoint_port_input
                 
                 [ -z "$endpoint_port_input" ] && endpoint_port_input="$default_endpoint_port"
             
             else
             
                 # DEBUG! r7 to-printf
-                read -p "Enter endpoint port (default: 51820): " endpoint_port_input
+                print "Enter endpoint port (${BLUE} WG default: 51820${NC}): "
+                read -r endpoint_port_input
             
                 [ -z "$endpoint_port_input" ] && endpoint_port_input="$DEFAULT_PORT"
             
@@ -2512,7 +2593,8 @@ setup_wireguard() {
             if [ -n "$default_allowed_ips" ]; then
             
                 # DEBUG! r7 to-printf
-                read -p "Enter allowed IPs (default: $default_allowed_ips): " allowed_ips_input
+                printf "Enter allowed IPs (${BLUE}default: $default_allowed_ips${NC}): "
+                read -r allowed_ips_input
             
                 [ -z "$allowed_ips_input" ] && allowed_ips_input="$default_allowed_ips"
             
@@ -2520,7 +2602,9 @@ setup_wireguard() {
             else
 
                 # DEBUG! r7 to-printf
-                read -p "Enter allowed IPs: " allowed_ips_input
+                printf "Enter allowed IPs: "
+                echo -e "\033[1m   (use COMMA-SEPARATED values, e.g.: 0.0.0.0/0, ::/0)\033[0m"
+                read -r allowed_ips_input
             
                 [ -z "$allowed_ips_input" ] && allowed_ips_input="0.0.0.0/0"
             
@@ -2571,9 +2655,10 @@ setup_wireguard() {
         while true; do
             
             # DEBUG! r7 to-printf
-            read -p "Enter DNS servers (default: $default_dns) " dns_input
+            printf "Enter DNS servers (${BLUE}default: $default_dns)${NC} "
+            read -r dns_input
             
-            # Si usuario presiona Enter sin escribir, usar default
+t
             if [ -z "$dns_input" ]; then
                 
                 dns="$default_dns"
@@ -2582,7 +2667,6 @@ setup_wireguard() {
             
             else
                 
-                # Validar lo que el usuario escribió
                 if validate_wg_config "manual" "" "DNS" "$dns_input" 2>/dev/null; then
                     
                     dns="$dns_input"   
@@ -2618,13 +2702,15 @@ setup_wireguard() {
         echo ""
 
         # DEBUG! r7 to-printf
-        read -p "Save config as .conf file in $WG_CONF_DIR? (y/N): " save_conf
+        printf "${YELLOW}Save config as .conf file in $WG_CONF_DIR? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+        read -r save_conf
 
         case "$save_conf" in
             y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                 
                 # DEBUG! r7 to-printf
-                read -p "Enter config filename (without .conf extension): " conf_filename
+                printf "${GREEN}Enter config filename (without .conf extension):${NC} " 
+                read -r conf_filename
                 [ -z "$conf_filename" ] && conf_filename="manual-$(date +%s)"
                 
                 
@@ -2642,7 +2728,8 @@ setup_wireguard() {
 
 
         # DEBUG! r7 to-printf
-        read -p "Confirm setup? (y/N): " confirm
+        printf "${YELLOW}Confirm setup? (${GREEN}Y${YELLOW}/${RED}n${YELLOW}):${NC} "
+        read -r  confirm
         case "$confirm" in
             y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                 ;;
@@ -2741,7 +2828,8 @@ save_wireguard_conf() {
         warning "Config file already exists: $conf_file"
 
         # DEBUG! r7 to-printf
-        read -p "Overwrite? (y/N): " confirm
+        printf "${YELLOW}Overwrite? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+        read -r confirm
         case "$confirm" in
             y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                 ;;
@@ -3266,7 +3354,7 @@ remove_wireguard() {
         
         elif [ "$should_restore_backups" -eq 0 ]; then
             
-            log -e "${YELLOW}Backups preserved (as other interfaces exist!)${NC}"
+            log "${YELLOW}Backups preserved (as other interfaces exist!)${NC}"
         
         fi
     fi
@@ -3297,15 +3385,6 @@ show_status() {
     state_init 2>/dev/null
     
 
-
-    echo ""
-    ui_lines 59 "${YELLOW}WireGuard Status${NC}"
-    echo ""
-
-    verbose log "Interface and config overview: "
-    verbose echo -e "  Check connection status (Created or not, UP/DOWN/routed, Orphaned status), "
-    verbose echo -e "  and verify if valid backups of your original configuration exist."
-    verbose echo ""
     
     # 1   GET ALL IFACES
     local all_interfaces=""
@@ -3321,10 +3400,15 @@ show_status() {
     # 1.1.1 IF NOT
     if [ -z "$all_interfaces" ]; then
         
-        log "No WireGuard interfaces found"
-        return
+        log "No WireGuard interfaces found!"
+        exit 0
     
     fi
+    
+    # 1.3.1 SHOW RESULT HEADER
+    echo ""
+    ui_lines 59 "${YELLOW}WireGuard Status${NC}"
+    echo ""
     
     # 1.2 HANDLE WHAT EXISTS
     for iface in $all_interfaces; do
@@ -3466,7 +3550,13 @@ show_status() {
         fi
         
 
-        # 1.3   RESULTS
+        # 1.3.2   RESULTS FOR EACH
+
+        verbose echo ""
+        verbose log "Interface and config overview: "
+        verbose echo -e "  Check connection status (Created or not, UP/DOWN/routed, Orphaned status), "
+        verbose echo -e "  and verify if valid backups of your original configuration exist."
+        verbose echo ""
         ui_lines 39 "${BLUE}$iface${NC} (${status_tags})"
         printf "$details"
         echo ""
@@ -4318,7 +4408,7 @@ cleanup() {
             done
 
             echo ""
-            printf "Enter number (or press Enter to cancel): "
+            printf "${YELLOW}Choose an inteface${NC} (or press Enter to cancel): "
             read -r selection
 
             if [ -z "$selection" ]; then
@@ -4422,7 +4512,7 @@ cleanup() {
             ui_lines 50
             echo ""
 
-            printf "Proceed with cleanup? (y/N): "
+            printf "${YELLOW}Proceed with cleanup? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
             read -r confirm
 
             case "$confirm" in
@@ -4933,6 +5023,9 @@ set_lan_routes() {
     # 4. RT_TABLES
     local table_name="_vpn_${wg_iface}_${lan_iface}"
 
+    # UNCONDITIONAL TABLES PRECHECK
+    rt_tables_health
+
     # 4.1 IF IN USE VERIFY
     if [ -f /etc/iproute2/rt_tables ]; then
         
@@ -5021,41 +5114,9 @@ set_lan_routes() {
     
     
     else
+    # DEBUG!    ... fix this empty exception (or room for future SWITCH / BYPASS)
+        :
 
-        # DEBUG! 
-        debug_write "[ROUTES SET] RT_TABLES file NOT FOUND! Check 'ip', reboot, perform a cleanup!"
-
-        warning "Routing tables file not found, attempting to create..."
-        warning "This is trully BIZARRE, please, pay attention:"
-        echo -e "   Your ${RED}/etc/iproute2/rt_tables${NC} is MISSING, and this SHOULD NOT be happening!"
-        echo -e "   To be safe, at this point, a new fully-compatible rt_tables file is being created"
-        echo -e "   Even this will work well, you may prefer to check your configs. and/or reboot the device"
-        verbose echo ""
-        verbose log "The 'rt_tables' file is used by default by a ${YELLOW}CORE${NC} dependency included as standard in ALL OpenWRT builds (the 'ip' package)."        
-        verbose echo -e "   This is highly unusual for this file to be missing. 'wg-autoconf' has encountered this issue and, while it didn't cause the problem, ${GREEN}this issue can be fixed${NC}."        
-        verbose echo -e "   ${YELLOW}HOWEVER, just because it can be fixed temporarily doesn't mean the error won't happen again${NC}; it is up to you to find out what has happened with 'ip'/'rt_tables'"
-
-        
-        
-        mkdir -p /etc/iproute2 2>/dev/null
-        {
-            echo "# rt_tables file restored by"
-            echo "#   wg-autoconf $VERSION "
-            echo "# Check your 'ip' package issues!"
-            echo "#"
-            echo "# reserved values"
-            echo "#"
-            echo "128     prelocal"
-            echo "255     local"
-            echo "254     main"
-            echo "253     default"
-            echo "0       unspec"
-            echo "#"
-            echo "# local"
-            echo "#"
-            echo "#1      inr.ruhep"
-            echo "$table_id     $table_name"
-        } > /etc/iproute2/rt_tables 2>/dev/null
     fi
 
     # 6. DEL RULES
@@ -5071,8 +5132,11 @@ set_lan_routes() {
     if ! ip rule add from "$subnet" to "$subnet" lookup main 2>/dev/null; then
         warning "Failed to add local rule"
     fi
-    
+
+    # DEBUG! r7 ... Fails, WHEN MULTIPLE ROUTING, SHOWS WARNING, but RT_TABLES and ROUTING ARE OK
+    # TODO:    increase/improve logic
     if ! ip route add "$subnet" dev "$lan_iface" table "$table_name" 2>/dev/null; then
+
         warning "Failed to add local route for $subnet"
     fi
     
@@ -5262,23 +5326,40 @@ unset_lan_routes() {
 
     # 0)    UNCONDITIONAL PRECHECKS
     upgrade_avoid_garbage
+    rt_tables_health
 
     [ -z "$wg_iface" ] && error "WireGuard interface name required!"
     [ -z "$lan_iface" ] && error "LAN interface name required!"
 
+
+ 
+
+
     state_init
+
+
+    # 1.    LETSDOTHIS
     local wg_id=$(state_get_id "$wg_iface" 2>/dev/null)
     local wg_id_found=$?
+
+    local subnet=""
+    local table_name="_vpn_${wg_iface}_${lan_iface}"
+
+    # PRECONDITIONAL POST-CHECKS
+    if ! grep -q "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
+        
+        debug_write "[ROUTES UNSET] Attempt to remove non-existant rt_tables | From: $wg_iface, To: $lan_iface"
+        debug_write ""
+        debug cat $DEFAULT_TABLES | grep _vpn_
+        error "No routes configured for $wg_iface <-> $lan_iface (table '$table_name' not found!)"
+    
+    fi   
 
     log "Removing routes for $lan_iface (via $wg_iface)..."
     echo ""
 
-    local subnet=""
-    local table_name="_vpn_${wg_iface}_${lan_iface}"
-    
 
-
-    # DETERMINE SUBNET (same logic as set_lan_routes)
+    # DETERMINE SUBNET
     local lan_ip=""
     local lan_netmask=""
     
@@ -5327,11 +5408,10 @@ unset_lan_routes() {
     # REMOVE IP RULES
     ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
     ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
+
+    # DEBUG! r7 ... flushing tables adds A LOT OF CPU CYCLES
+    # TODO:     Test security/cleanings without flushing anything!
     ip route flush table "$table_name" 2>/dev/null
-
-
-
-
 
 
     # REMOVE FIREWALL RULES
@@ -5344,7 +5424,8 @@ unset_lan_routes() {
     
     else
         
-        
+        # DEBUG! r7 ... CONSUMING A LOT OF CPU CYCLES!!!!!!
+        # TODO:     idk, tested a lot of ways
         # A)    FIND ITS OWN FW TAG ID BLOCK
         local fw_line=$(grep -n "option name[[:space:]]*['\"]$wg_iface['\"]" "$FIREWALL_CONF" 2>/dev/null | head -1 | cut -d: -f1)
         
@@ -5497,74 +5578,43 @@ unset_lan_routes() {
 
 
     # REMOVE FROM RT_TABLES
-
-    if [ -f /etc/iproute2/rt_tables ]; then
+    if [ -f "$DEFAULT_TABLES" ]; then
 
         if grep -q "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
             
             local atomic_file="${ATOMIC_PATHS}/rt_tables.unset.$$"
             
-            # 1. Crear versión filtrada
+            # 1. FILTER
             if ! grep -v "^[0-9]\+[[:space:]]\+$table_name$" /etc/iproute2/rt_tables > "$atomic_file" 2>/dev/null; then
                 
                 error "Failed to create filtered routing tables"
             
             fi
             
-            # 2. Verificar que el archivo no está vacío (no debería serlo)
+            # 2. UF EXIST-NONEMPTY)
             if [ ! -s "$atomic_file" ]; then
+                
                 rm -f "$atomic_file" 2>/dev/null
                 error "Filtered routing tables file is empty"
+            
             fi
             
-            # 3. Verificar que realmente eliminó la entrada
+            # 3. CHECK DELETION
             if grep -q "^[0-9]\+[[:space:]]\+$table_name$" "$atomic_file" 2>/dev/null; then
                 rm -f "$atomic_file" 2>/dev/null
                 error "Failed to filter table entry: $table_name"
             fi
             
-            # 4. Reemplazar atómicamente
+            # 4. ATOMIC REPLACE
             if ! mv "$atomic_file" /etc/iproute2/rt_tables; then
+                
                 rm -f "$atomic_file" 2>/dev/null
                 error "Failed to atomically update routing tables"
+            
             fi
             
             verbose success "Table removed from rt_tables: $table_name"
         fi
-    
-        # DEBUG! 
-        debug_write "[ROUTES UNSET] RT_TABLES file NOT FOUND! Check 'ip', reboot, perform a cleanup!"
-
-        warning "Routing tables file not found, attempting to create..."
-        warning "This is trully BIZARRE, please, pay attention:"
-        echo -e "   Your ${RED}/etc/iproute2/rt_tables${NC} is MISSING, and this SHOULD NOT be happening!"
-        echo -e "   To be safe, at this point, a new fully-compatible rt_tables file is being created"
-        echo -e "   Even this will work well, you may prefer to check your configs. and/or reboot the device"
-        verbose echo ""
-        verbose log "The 'rt_tables' file is used by default by a ${YELLOW}CORE${NC} dependency included as standard in ALL OpenWRT builds (the 'ip' package)."        
-        verbose echo -e "   This is highly unusual for this file to be missing. 'wg-autoconf' has encountered this issue and, while it didn't cause the problem, ${GREEN}this issue can be fixed${NC}."        
-        verbose echo -e "   ${YELLOW}HOWEVER, just because it can be fixed temporarily doesn't mean the error won't happen again${NC}; it is up to you to find out what has happened with 'ip'/'rt_tables'"
-
-        
-        
-        mkdir -p /etc/iproute2 2>/dev/null
-        {
-            echo "# rt_tables file restored by"
-            echo "#   wg-autoconf $VERSION "
-            echo "# Check your 'ip' package issues!"
-            echo "#"
-            echo "# reserved values"
-            echo "#"
-            echo "128     prelocal"
-            echo "255     local"
-            echo "254     main"
-            echo "253     default"
-            echo "0       unspec"
-            echo "#"
-            echo "# local"
-            echo "#"
-            echo "#1      inr.ruhep"
-        } > /etc/iproute2/rt_tables 2>/dev/null
     
     
     fi
@@ -5657,7 +5707,8 @@ upgrade_avoid_garbage() {
         echo ""
         
         # DEBUG! r7 to-printf
-        read -p "Run 'wg-autoconf nuke' now? (y/N): " confirm
+        printf "${YELLOW}Run '${GREEN}wg-autoconf nuke${YELLOW}' now? (${GREEN}Y${YELLOW}/${RED}n${YELLOW}):${NC} "
+        read -r confirm
         case "$confirm" in
             y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
                 log "Running nuke to clean up upgrade garbage..."
@@ -5703,8 +5754,8 @@ upgrade_tmp_script() {
 
         while :; do
 
-            printf "Enter path for upgrade script (E.g: /tmp/upgrade.sh): "
-            read new_path
+            printf "${YELLOW}Enter path for upgrade script${NC} (E.g: /tmp/upgrade.sh): "
+            read -r new_path
 
             if [ -z "$new_path" ]; then
 
@@ -5842,8 +5893,8 @@ upgrade_app() {
     echo ""
 
     while :; do
-        printf "Choose an option : "
-        read option
+        printf "${YELLOW}Choose an option :${NC} "
+        read -r option
 
         case "$option" in
             1|2)
@@ -5865,8 +5916,8 @@ upgrade_app() {
         1)
             while :; do
                 debug_write "[UPGRADE] Custom local APK file mode selected ..."
-                printf "Enter full PATH to local APK file (E.g., /tmp/file.apk): "
-                read filepath
+                printf "${YELLOW}Enter full PATH to local APK file${NC} (E.g., /tmp/file.apk): "
+                read -r filepath
 
                 if [ -z "$filepath" ]; then
                     warning "File path cannot be empty."
@@ -6923,7 +6974,8 @@ debug_clear() {
 
     echo ""
     # DEBUG! r7 to-printf
-    read -p "Continue? (y/N): " confirm
+    printf "${YELLOW}Continue? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+    read -r confirm
     case "$confirm" in
         y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
             rm -f "$DEBUG_LOG" "$DEBUG_PATH/wg-autoconf-OLD-"*.log 2>/dev/null
