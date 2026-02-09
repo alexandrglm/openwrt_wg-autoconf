@@ -1,0 +1,9 @@
+===[ wg-autoconf 0.0.1r3 DEBUGGING log ]===========
+
+pkgname=wg-autoconf
+pkgver=1.0.0
+pkgrel=3
+pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
+url="https://github.com/alexandrglm/openwrt_wg-autoconf"
+
+===================================================
