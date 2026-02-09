@@ -2763,8 +2763,8 @@ setup_wireguard() {
             fi
             
             
-            
-            if validate_wg_config "manual" "" "AllowedIPs" "$allowed_ips_input" 2>/dev/null; then
+            # DEBUG! r7 NO REDIRECTS!
+            if validate_wg_config "manual" "" "AllowedIPs" "$allowed_ips_input"; then
             
                 allowed_ips="$allowed_ips_input"
             
@@ -2805,8 +2805,6 @@ setup_wireguard() {
             
             printf "Enter DNS servers (${BLUE}default: $default_dns)${NC} "
             read -r dns_input
-            
-t
             if [ -z "$dns_input" ]; then
                 
                 dns="$default_dns"
@@ -2815,7 +2813,8 @@ t
             
             else
                 
-                if validate_wg_config "manual" "" "DNS" "$dns_input" 2>/dev/null; then
+                # DEBUG! r7 NO REDIRECTS!
+                if validate_wg_config "manual" "" "DNS" "$dns_input"; then
                     
                     dns="$dns_input"   
                     break
