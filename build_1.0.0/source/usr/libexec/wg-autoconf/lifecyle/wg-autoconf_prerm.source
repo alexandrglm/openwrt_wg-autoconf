@@ -1,5 +1,5 @@
 #!/bin/ash
-# rel7 pre_deinstall() lifecycle method
+# 1.0.0-r1 pre_deinstall() lifecycle method
 
 cleanup_success=0
 

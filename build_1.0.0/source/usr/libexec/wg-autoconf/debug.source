@@ -1,11 +1,11 @@
-# debug rel5
+# debug 1.0.0-r1
 debug_log() {
 
     local msg="$1"
     local log_dir="/etc/libexec/wg-autoconf/logs"
     local log_file
 
-    local version="1.0.0-r3"
+    local version="1.0.0-r1"
     local header='===[ wg-autoconf $version DEBUGGING log ]===========
 
 pkgname=wg-autoconf

@@ -1,5 +1,5 @@
 #!/bin/ash /etc/rc.common
-# wg-autoconf_boot_cleanup for 1.0.0-r7 DEBUG
+# wg-autoconf_boot_cleanup 1.0.0-r1
 START=93
 
 start() {

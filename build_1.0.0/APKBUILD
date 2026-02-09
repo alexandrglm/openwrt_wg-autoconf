@@ -1,7 +1,7 @@
 # Maintainer: Alexander Gomez <alexandrglm@proton.me>
 pkgname=wg-autoconf
 pkgver=1.0.0
-pkgrel=7
+pkgrel=1
 pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
 url="https://github.com/alexandrglm/openwrt_wg-autoconf"
 arch="noarch"
@@ -28,7 +28,3 @@ package() {
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
 }
-
-sha512sums="
-94e3e70ab30abd0787fc268066fa4a0fa820872c8c6bcd833cb5f2daea08d4384abacf31ce7efb29405456fc639a2ae2d9388b01bd96e2188eb55004d65530e2  source.tar.gz
-"
