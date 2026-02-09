@@ -14,15 +14,129 @@ DEBUG_IS_ACTIVE=0
 ADVANCED_MODE=0
 CONF_NAME=""
 VERBOSE=0
+USER_SETTINGS_FILE="/usr/libexec/wg-autoconf/user_settings"
 DEFAULT_DNS="1.1.1.1, 1.0.0.1"
 DEFAULT_PORT=51820
 DEFAULT_ALLOW_IPS="0.0.0.0/0"
+DEFAULT_COLOURS=1
 DEFAULT_TABLES="/etc/iproute2/rt_tables"
-RED='\033[1;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+create_default_user_settings() {
+    local settings_dir=$(dirname "$USER_SETTINGS_FILE")
+    mkdir -p "$settings_dir" 2>/dev/null
+    {
+        echo "# wg-autoconf $VERSION User Settings"
+        echo "# This file overrides built-in defaults."
+        echo "# Use: wg-autoconf settings set <key> <value>"
+        echo "# Or edit manually and reload with: wg-autoconf settings edit"
+        echo 'DEFAULT_DNS="1.1.1.1, 1.0.0.1"'
+        echo 'DEFAULT_PORT="51820"'
+        echo 'DEFAULT_ALLOW_IPS="0.0.0.0/0"'
+        echo 'DEFAULT_COLOURS="1"'
+    } > "$USER_SETTINGS_FILE"
+    chmod 644 "$USER_SETTINGS_FILE" 2>/dev/null
+}
+show_user_settings() {
+    if [ -f "$USER_SETTINGS_FILE" ]; then
+        cat "$USER_SETTINGS_FILE"
+    else
+        warning "No user settings file found. Creating default..."
+        create_default_user_settings
+        cat "$USER_SETTINGS_FILE"
+    fi
+}
+set_user_setting() {
+    local key="$1"
+    local value="$2"
+    case "$key" in
+        dns|DNS) 
+            key="DEFAULT_DNS"
+            ;;
+        port|PORT)
+            key="DEFAULT_PORT"
+            ;;
+        allowed|allowedips|ALLOWED|ALLOWEDIPS)
+            key="DEFAULT_ALLOW_IPS"
+            ;;
+        colours|colors|colour|color|COLORS|COLOURS|COLOR|COLORS)
+            key="DEFAULT_COLOURS"
+            ;;
+        *) key="DEFAULT_${key^^}"
+        ;;
+    esac
+    case "$key" in
+        DEFAULT_DNS) 
+            validate_wg_config "manual" "" "DNS" "$value" || return 1 
+            ;;
+        DEFAULT_PORT) 
+            if ! echo "$value" | grep -qE '^[0-9]+$' || [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+                error "Invalid port: $value"
+            fi
+            ;;
+        DEFAULT_ALLOW_IPS)
+            validate_wg_config "manual" "" "AllowedIPs" "$value" || return 1
+            ;;
+        DEFAULT_COLOURS)
+            case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+                0|off|no|false|disable|OFF|NO|FALSE|DISABLE)
+                    value="0"
+                    ;;
+                1|on|yes|true|enable|ON|YES|TRUE|ENABLE)
+                    value="1"
+                    ;;
+                *)
+                    error "Invalid colours value: '${YELLOW}$value${NC}' (use: 0/1, on/off, yes/no, true/false, enable/disable)"
+                    ;;
+            esac
+            ;;
+        *)
+            error "Unknown setting: ${YELLOW}'$key'${NC}. Check available user settings: ${YELLOW}wg-autoconf settings ${GREEN}show${NC}" 
+            ;;
+    esac
+    [ ! -f "$USER_SETTINGS_FILE" ] && create_default_user_settings
+    if grep -q "^$key=" "$USER_SETTINGS_FILE"; then
+        sed -i "s/^$key=.*/$key=\"$value\"/" "$USER_SETTINGS_FILE"
+    else
+        echo "$key=\"$value\"" >> "$USER_SETTINGS_FILE"
+    fi
+    eval "$key=\"$value\""
+    success "Setting updated: ${YELLOW}${key#DEFAULT_} ${NC} / ${GREEN}$value${NC}"
+}
+load_user_settings() {
+    [ ! -f "$USER_SETTINGS_FILE" ] && create_default_user_settings
+    while IFS='=' read -r key value 2>/dev/null; do
+        key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+        case "$key" in
+            DEFAULT_DNS)
+                DEFAULT_DNS="$value"
+                ;;
+            DEFAULT_PORT)
+                DEFAULT_PORT="$value"
+                ;;
+            DEFAULT_ALLOW_IPS)
+                DEFAULT_ALLOW_IPS="$value"
+                ;;
+            DEFAULT_COLOURS)
+                DEFAULT_COLOURS="$value"
+                ;;
+        esac
+    done < "$USER_SETTINGS_FILE"
+}
+load_user_settings
+if [ "$DEFAULT_COLOURS" = "1" ]; then
+    RED='\033[1;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
 log() { echo -e "${BLUE}[wg-autoconf]${NC} $1" >&2; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 success() { echo -e "${GREEN}[OK]${NC} $1" >&2; }
@@ -117,8 +231,11 @@ dns_leakage() {
         fi
         temp_dns="${temp_dns#*,}"
     done
-    [ -z "$dns_list" ] && return 0
-    warning "   ${YELLOW}DNS Security Note${NC} about $dns_list (use ${BLUE}--verbose${NC} mode)"
+    if [ -z "$dns_list" ]; then
+        warning "   NO DNS FOUND IN YOUR SETUP!"
+        return 0
+    fi
+    warning "   ${YELLOW}DNS Security Note${NC} about '$dns_list' (re-setup with ${BLUE}--verbose${NC})"
     verbose echo ""
     verbose ui_lines 49 "${YELLOW}DNS LEAKAGE WARNING${NC}"
     verbose echo ""
@@ -127,7 +244,7 @@ dns_leakage() {
     if [ $has_local_ip_dns -eq 1 ]; then
         verbose echo -e "   ${RED}  POTENTIAL DNS LEAK DETECTED${NC}"
         verbose echo ""
-        verbose echo "   You're using your local VPN IP ($local_ip) as DNS server."
+        verbose echo "   You're using your local VPN IP '($local_ip)' as DNS server."
         verbose echo ""
         verbose echo -e "   ${YELLOW}Possible issues:${NC}"
         verbose echo "     1. Provider DNS may be blocked"
@@ -137,7 +254,7 @@ dns_leakage() {
     elif [ $has_tunnel_range_dns -eq 1 ]; then
         verbose echo -e "   ${YELLOW}  POTENTIAL DNS IN TUNNEL RANGE DETECTED${NC}"
         verbose echo ""
-        verbose echo "   You're using a DNS server in a private/tunnel IP range."
+        verbose echo "   You're using a DNS server in a private/tunnel IP range ('$dns_list')"
         verbose echo ""
         verbose echo "   This typically means:"
         verbose echo "     - The VPN provider runs their own DNS resolver"
@@ -169,8 +286,8 @@ dns_leakage() {
 get_conf_value() {
     local key="$1"
     local file="$2"
-    local format="${3:-raw}"  # raw, uci, conf
-    local direct_value="$4"   # Opcional: valor directo en lugar de leer archivo
+    local format="${3:-raw}"
+    local direct_value="$4"
     local raw_value=""
     if [ -n "$direct_value" ]; then
         raw_value="$direct_value"
@@ -201,7 +318,7 @@ get_conf_value() {
 validate_config_value() {
     local key="$1"
     local value="$2"
-    local context="${3:-setup}"  # setup, manual, etc
+    local context="${3:-setup}"
     case "$key" in
         DNS)
             validate_wg_config "$context" "" "DNS" "$value"
@@ -225,10 +342,10 @@ validate_config_value() {
     return 0
 }
 validate_wg_config() {
-    local config_type="$1"  # "auto" o "manual"
-    local config_file="$2"  # Solo para modo auto
-    local field="$3"        # Campo a validar
-    local value="$4"        # Valor a validar
+    local config_type="$1"
+    local config_file="$2"
+    local field="$3"
+    local value="$4"
     local test_mode="${5:-0}"
     debug_write "[VALIDATE] Validating $field: '$value' (test_mode=$test_mode)"
     _validate_error() {
@@ -1086,7 +1203,8 @@ setup_wireguard() {
             if [ $is_manual -eq 0 ]; then
                 error "$conf_file is missing!!!"
             else
-                warning "Configuration file not found: $conf_file"
+                error "Configuration file not found: $conf_file"
+                echo "Esto no deberia mostrarse en tanto error hace exit 1"
                 conf_file=""
             fi
         else
@@ -1443,16 +1561,14 @@ t
     verbose success "D0ne!"
     echo ""
     ui_lines 65 "${GREEN}WireGuard CONFIG${NC}"
-    echo -e "- ${BLUE}Interface:${NC}           ${YELLOW}$iface_name${NC}"
-    echo -e "- ${BLUE}Local IP:${NC}            ${YELLOW}$address${NC}"
-    echo -e "- ${BLUE}Endpoint:${NC}            ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
-    echo -e "- ${BLUE}DNS:${NC}                 ${YELLOW}${dns}${NC}"
+    echo -e "- ${BLUE}Interface:${NC}          ${YELLOW}$iface_name${NC}"
+    echo -e "- ${BLUE}Local IP:${NC}           ${YELLOW}$address${NC}"
+    echo -e "- ${BLUE}Endpoint:${NC}           ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
+    echo -e "- ${BLUE}DNS:${NC}                ${YELLOW}${dns}${NC}"
     ui_lines 65 "${GREEN}FINISH SETUP${NC}"
     echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
     echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
     echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
-    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE LANs:${NC}        ${YELLOW}wg-autoconf routes set $iface_name <lan_iface>${NC}"
-    echo ""
     ui_lines 66
 }
 save_wireguard_conf() {
@@ -1533,7 +1649,7 @@ activate_interface() {
     debug_write "[UP] Running ifup $iface"
     if ifup "$iface" >/dev/null 2>&1; then
         debug_write "[UP] ifup succeeded, waiting for interface..."
-        local timeout=10
+        local timeout=2
         local count=0
         while [ $count -lt $timeout ]; do
             if ip link show "$iface" >/dev/null 2>&1; then
@@ -1769,9 +1885,9 @@ remove_wireguard() {
         else
             debug_write "[REMOVE WARNING] Failed to update state for ID_$iface_id!!!"
             debug cat /usr/libexec/wg-autoconf/states
-            error "wg-autoconf inner malfunction!:"
-            verbose warning "Post-operation manual checks are required upon completion:"
-            verbose warning "  - You might make a full cleanup with ${YELLOW}wg-autoconf nuke${NC}"
+            echo -e "${RED}[ERROR]${NC} wg-autoconf inner malfunction!:"
+            warning "Post-operation manual checks are required upon completion:"
+            warning "  - You might make a full cleanup with ${YELLOW}wg-autoconf nuke${NC}"
         fi
     fi
     debug_write "[REMOVE] Completed: restore_result=$restore_result, remaining_ifaces=$remaining_count"
@@ -1865,8 +1981,8 @@ show_status() {
             [ $backup_count -eq 3 ] && details="${details} ${BLUE}(network, dhcp, firewall)${NC}"    
             details="${details}\n"
         fi
-        verbose echo ""
         verbose log "Interface and config overview: "
+        verbose echo ""
         verbose echo -e "  Check connection status (Created or not, UP/DOWN/routed, Orphaned status), "
         verbose echo -e "  and verify if valid backups of your original configuration exist."
         verbose echo ""
@@ -1875,6 +1991,7 @@ show_status() {
         echo ""
     done
     ui_lines 60
+    exit 0
 }
 backup_config_file() {
     local file="$1"
@@ -2810,7 +2927,6 @@ unset_lan_routes() {
         error "No routes configured for $wg_iface <-> $lan_iface (table '$table_name' not found!)"
     fi   
     log "Removing routes for $lan_iface (via $wg_iface)..."
-    echo ""
     local lan_ip=""
     local lan_netmask=""
     lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null)
@@ -2965,10 +3081,24 @@ unset_lan_routes() {
             verbose success "Table removed from rt_tables: $table_name"
         fi
     fi
+    local remaining_tables=0
+    if [ -f /etc/iproute2/rt_tables ]; then
+        remaining_tables=$(grep "^[0-9]\+[[:space:]]\+_vpn_${wg_iface}_" /etc/iproute2/rt_tables 2>/dev/null | wc -l)
+    fi
+    if ! echo "$remaining_tables" | grep -qE '^[0-9]+$'; then
+        remaining_tables=0
+    fi
+    debug_write "[ROUTES UNSET] After deletion: $remaining_tables table(s) remain for $wg_iface"
     uci commit firewall 2>/dev/null
     /etc/init.d/firewall reload 2>/dev/null
     if [ $wg_id_found -eq 0 ] && [ -n "$wg_id" ]; then
-        state_write "ID_${wg_id}_IS_RT_TABLES_IN_USE" "0" 2>/dev/null
+        if [ "$remaining_tables" -eq 0 ]; then
+            state_write "ID_${wg_id}_IS_RT_TABLES_IN_USE" "0" 2>/dev/null
+            debug_write "[ROUTES UNSET] No more tables for $wg_iface, setting IS_RT_TABLES_IN_USE=0"
+        else
+            state_write "ID_${wg_id}_IS_RT_TABLES_IN_USE" "1" 2>/dev/null
+            debug_write "[ROUTES UNSET] $remaining_tables table(s) remain for $wg_iface, keeping IS_RT_TABLES_IN_USE=1"
+        fi
     fi
     echo ""
     success "$lan_iface routes (via $wg_iface) successfully removed!"
@@ -3976,6 +4106,28 @@ case "$cmd" in
         ;;
     upgrade)
         upgrade_app
+        ;;
+    settings|config)
+        case "$arg1" in
+            show)
+                [ -f "$USER_SETTINGS_FILE" ] && cat "$USER_SETTINGS_FILE" || echo "(using built-in defaults)"
+                ;;
+            set)
+                set_user_setting "$arg2" "$arg3"
+                ;;
+            edit)
+                ${EDITOR:-vi} "$USER_SETTINGS_FILE"
+                load_user_settings
+                ;;
+            reset)
+                rm -f "$USER_SETTINGS_FILE" 2>/dev/null
+                load_user_settings
+                success "Settings reset to defaults"
+                ;;
+            *)
+                echo "Usage: wg-autoconf settings [show|set|edit|reset]"
+                ;;
+        esac
         ;;
     *)
         show_header
