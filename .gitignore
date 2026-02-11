@@ -6,4 +6,5 @@
 **/0build.sh
 **/1keygen.sh
 **/source.tar.gz
+**/build_con_docker_abuild.sh
 
