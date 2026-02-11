@@ -99,7 +99,7 @@ set_user_setting() {
         echo "$key=\"$value\"" >> "$USER_SETTINGS_FILE"
     fi
     eval "$key=\"$value\""
-    success "Setting updated: ${YELLOW}${key#DEFAULT_} ${NC} / ${GREEN}$value${NC}"
+    success "Setting updated: ${YELLOW}${key#DEFAULT_} ${NC} = ${GREEN}$value${NC}"
 }
 load_user_settings() {
     [ ! -f "$USER_SETTINGS_FILE" ] && create_default_user_settings
@@ -1456,7 +1456,7 @@ setup_wireguard() {
                 read -r allowed_ips_input
                 [ -z "$allowed_ips_input" ] && allowed_ips_input="0.0.0.0/0"
             fi
-            if validate_wg_config "manual" "" "AllowedIPs" "$allowed_ips_input" 2>/dev/null; then
+            if validate_wg_config "manual" "" "AllowedIPs" "$allowed_ips_input"; then
                 allowed_ips="$allowed_ips_input"
                 break
             else
@@ -1474,13 +1474,12 @@ setup_wireguard() {
         while true; do
             printf "Enter DNS servers (${BLUE}default: $default_dns)${NC} "
             read -r dns_input
-t
             if [ -z "$dns_input" ]; then
                 dns="$default_dns"
                 verbose echo -e "${GREEN}Using default DNS: $default_dns${NC}"
                 break
             else
-                if validate_wg_config "manual" "" "DNS" "$dns_input" 2>/dev/null; then
+                if validate_wg_config "manual" "" "DNS" "$dns_input"; then
                     dns="$dns_input"   
                     break
                 else
@@ -4037,15 +4036,12 @@ case "$cmd" in
         ;;
     clean)
         if [ -n "$arg1" ]; then
-            # wg-autoconf clean wg0
             cleanup "single" "$arg1" ""
         else
-            # wg-autoconf clean
             cleanup "interactive" "" ""
         fi
         ;;
     nuke)
-        # wg-autoconf nuke
         cleanup "nuke" "" ""
         ;;
     backups)

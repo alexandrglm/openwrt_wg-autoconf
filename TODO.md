@@ -2,6 +2,7 @@
 
 - [ ] - Add wg servers setup/etc.. support.
 
+- [X] - Fix APKBUILD/Makefile dependencies to 'kmod-wireguard'
 - [X] - Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
 - [X] - `list_configs`, `list_configs_full`: Improve usability
 - [X] - `nuke_all`, nuke, clean funcs:  Refactor in one master-func, which dispatches "nuke mode", or "clean <iface> mode" straightforward; also emergency cleanups hardcoded logic

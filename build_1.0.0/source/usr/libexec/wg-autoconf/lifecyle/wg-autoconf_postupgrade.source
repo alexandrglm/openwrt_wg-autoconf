@@ -1,5 +1,5 @@
 #!/bin/ash
-# 1.0.0-r1 post_install() lifecycle methods
+# 1.0.0-r1 post_upgrade() lifecycle methods
 VERSION="1.0.0-r1"
 
 mkdir -p /etc/wireguard/
@@ -10,8 +10,10 @@ cat << 'EOF' > /usr/libexec/wg-autoconf/states
 IS_INSTALLED=1
 IS_FIRST_EXEC=1
 IS_PREV_TO_UPGRADE=0
-IS_UPGRADED=0
+IS_UPGRADED=1
 EOF
+
+echo "AND THEN, THIS IS A POST-UPGRADE CONFIRMATION!"
 
 chmod +x /etc/init.d/wg-autoconf_boot_cleanup
 sleep 1

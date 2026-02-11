@@ -1,6 +1,9 @@
 **/packages
-**/abuild-docker.conf
-**/build_con_docker_abuild.sh
-**/source.tar.gz
+**/docker-cache
 **/release_tarball
 **/TOOLS
+**/abuild-docker.conf
+**/0build.sh
+**/1keygen.sh
+**/source.tar.gz
+

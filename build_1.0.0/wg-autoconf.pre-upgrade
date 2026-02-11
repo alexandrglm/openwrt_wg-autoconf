@@ -1,0 +1,4 @@
+#!/bin/ash
+# 1.0.0-r1 Pre-Install method
+echo "THIS IS A PRE-UPGRADE WARNING!"
+exit 0
