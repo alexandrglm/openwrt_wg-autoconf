@@ -1,6 +1,8 @@
 ### 0.0.1-r7 -> 1.0.0 r1
 
-- [ ] - Add wg servers setup/etc.. support.
+- [ ] - Migrate dependences (**and syntax**,  lot of breaking changes) to the basis, 'kmod-wireguard', and 'ip-tiny' for the ip implemntation; as a consecuence, implement new state flag for "available bins" for some "advanced" options (`wireguard-tools` for status and a plausible WG Server feature; `ip-full` for IPv6 routing support) and also add logic to check bins/flags on each "advanced" options (`if [ ! "$IS_IP-FULL" = "0" ] && ADVANCED OPERATION LOGIc `). 
+Or retain `wireguard-tools`as the root dependence. 
+- [ ] - Add wg servers setup/etc.. support. 
 
 - [X] - Fix APKBUILD/Makefile dependencies to 'kmod-wireguard'
 - [X] - Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
