@@ -1564,9 +1564,10 @@ setup_wireguard() {
     echo -e "- ${BLUE}Endpoint:${NC}           ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
     echo -e "- ${BLUE}DNS:${NC}                ${YELLOW}${dns}${NC}"
     ui_lines 65 "${GREEN}FINISH SETUP${NC}"
-    echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
-    echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
-    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
+    echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up ${GREEN}$iface_name${NC}"
+    echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg-autoconf ${GREEN}$iface_name${NC}"
+    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I ${GREEN}$iface_name ${BLUE}openwrt.com${NC}"
+    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE IT:${NC}          ${YELLOW}wg_autoconf routes set ${GREEN}$iface_name <dst iface>${NC}"
     ui_lines 66
 }
 save_wireguard_conf() {

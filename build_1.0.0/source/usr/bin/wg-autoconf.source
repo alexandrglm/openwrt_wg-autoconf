@@ -2937,9 +2937,10 @@ setup_wireguard() {
     echo -e "- ${BLUE}DNS:${NC}                ${YELLOW}${dns}${NC}"
     
     ui_lines 65 "${GREEN}FINISH SETUP${NC}"
-    echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up $iface_name${NC}"
-    echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg show $iface_name${NC}"
-    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I $iface_name 8.8.8.8${NC}"
+    echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up ${GREEN}$iface_name${NC}"
+    echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg-autoconf ${GREEN}$iface_name${NC}"
+    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I ${GREEN}$iface_name ${BLUE}openwrt.com${NC}"
+    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE IT:${NC}          ${YELLOW}wg_autoconf routes set ${GREEN}$iface_name <dst iface>${NC}"
     ui_lines 66
 }
 
@@ -6577,40 +6578,7 @@ debug_handler() {
 # Return: 0 on success, 1 if file already exists or mkdir fails
 #
 #####################################################################
-#####################################################################
-# STATE_SAFETY - Verify state file integrity and consistency
-#
-# Performs comprehensive validation of the state file:
-#   1. Checks if state file exists
-#   2. Verifies first line is exactly "IS_INSTALLED=1"
-#   3. Checks IS_PREV_TO_UPGRADE flag (must be 0)
-#   4. Checks IS_UPGRADED flag (must be 0)
-#
-# This function should be called at the beginning of all critical
-# operations (setup, up, down, remove, routes, nuke) to ensure
-# state file integrity before proceeding.
-#
-# Params: None
-# Return: 0 on success (all checks pass), 1 on failure
-# Exit: 1 on critical errors (with appropriate error message)
-#
-#####################################################################
-#####################################################################
-# STATE_SAFETY - Verify state file integrity and consistency
-#
-# Performs comprehensive validation of the state file:
-#   1. Checks if state file exists - if not, triggers _corrupted()
-#   2. Verifies first line is exactly "IS_INSTALLED=1" - if not, _corrupted()
-#   3. Checks IS_PREV_TO_UPGRADE flag:
-#      - If missing/corrupted → _corrupted()
-#      - If =1 → calls upgrade_avoid_garbage()
-#      - If =0 → OK, continue
-#   4. Checks IS_UPGRADED flag:
-#      - If missing/corrupted → _corrupted()
-#      - If =1 → shows notice, auto-resets to 0
-#      - If =0 → OK, continue
-#
-#####################################################################
+
 
 state_safety() {
 
@@ -6640,6 +6608,7 @@ state_safety() {
         echo ""
         
         printf "${YELLOW}Proceed with FULL CLEANUP? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+        
         read -r confirm
         case "$confirm" in
             y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
