@@ -31,5 +31,5 @@ package() {
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/states.source" "$pkgdir/usr/libexec/wg-autoconf/states"
 }
 sha512sums="
-f639c38e9787f929e63f688ac2e476fc53159100bebab1610e465005b9f132d55a726393e45586021106ed27a016fa4d89c65bf9e71faf06b63a2ace2531f9cd  source.tar.gz
+0e06d20ac83d6fca0540a85215c40a32c429a58ec462c045d9ef2f6a19fb04439026239ce5ee5a094cf3008b9c34e613293f6ec4b8830d5b27bea6d4940c7d81  source.tar.gz
 "

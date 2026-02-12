@@ -214,18 +214,15 @@ load_user_settings() {
     done < "$USER_SETTINGS_FILE"
 }
 
-# GLOBAL SETTINGS LOADER
-load_user_settings
-
 
 #####################################################################
 #
-# ██╗   ██╗████████╗██╗██╗     ███████╗
-# ██║   ██║╚══██╔══╝██║██║     ██╔════╝
-# ██║   ██║   ██║   ██║██║     ███████╗
-# ██║   ██║   ██║   ██║██║     ╚════██║
-# ╚██████╔╝   ██║   ██║███████╗███████║
-#  ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+# ██╗   ██╗  ██╗        ██╗   ██╗  ██╗  ██╗
+# ██║   ██║    ║    ╔╗  ██║   ██║  ╚██╗██╔╝
+# ██║   ██║  ██║   ██║  ██║   ██║   ╚███╔╝    
+# ██║   ██║  ██║   ╚═╝  ██║   ██║   ██╔██╗ 
+# ╚██████╔╝  ██║        ╚██████╔╝  ██╔╝ ██╗
+#  ╚═════╝   ╚═╝         ╚═════╝   ╚═╝  ╚═╝
 #
 #####################################################################
 # 1.    CLI-UI funcs (colous, ui_lines)
@@ -292,6 +289,8 @@ ui_lines() {
     [ "$padding" -gt 0 ] && printf '%*s' "$padding" '' | tr ' ' '='
     printf '\n'
 }
+
+
 
 #####################################################################
 # HANDLER -> RT_TABLES SAFETY
@@ -6058,7 +6057,7 @@ upgrade_app() {
 
     local option
     local filepath
-    local upgrade_script="/tmp/wg-autoconf-upgrading.sh"
+    local upgrade_script="${ATOMICS}/wg-autoconf-upgrading.sh"
     local apk_command=""
 
     echo ""
@@ -6114,7 +6113,7 @@ upgrade_app() {
                 fi
 
                 if echo "$filepath" | grep "\.apk$" >/dev/null 2>&1; then
-                    apk_command="apk add --force-overwrite --allow-untrusted \"$filepath\""
+                    apk_command="apk add --upgrade \"$filepath\""
                     break
 
                 else
@@ -6174,6 +6173,365 @@ upgrade_app() {
 
 
 
+###########################################################
+#
+# ██████╗ ███████╗██████╗ ██╗   ██╗ ██████╗
+# ██╔══██╗██╔════╝██╔══██╗██║   ██║██╔════╝
+# ██║  ██║█████╗  ██████╔╝██║   ██║██║  ███╗
+# ██║  ██║██╔══╝  ██╔══██╗██║   ██║██║   ██║
+# ██████╔╝███████╗██████╗╚██████╔╝╚███████═╝
+# ╚═════╝ ╚══════╝╚═════╝ ╚═════╝  ╚═════╝
+#
+###########################################################
+
+###########################################################
+# DEBUG LOGGING SYSTEM
+###########################################################
+
+debug_init_log() {
+
+    mkdir -p "$DEBUG_PATH" 2>/dev/null || return 1
+
+    if [ ! -f "$DEBUG_LOG" ]; then
+        cat > "$DEBUG_LOG" << EOF
+===[ wg-autoconf $VERSION DEBUG LOG ]=======================
+Started: $(date '+%Y-%m-%d %H:%M:%S')
+=============================================================
+
+EOF
+    fi
+}
+
+debug_state_read() {
+
+    if [ -f "$DEBUG_PATH/debug-state" ]; then
+        cat "$DEBUG_PATH/debug-state"
+    else
+        echo "0"
+    fi
+
+}
+
+debug_state_write() {
+
+    local state="$1"
+    mkdir -p "$DEBUG_PATH" 2>/dev/null
+    echo "$state" > "$DEBUG_PATH/debug-state"
+}
+
+debug_is_active() {
+
+    [ "$(debug_state_read)" = "1" ]
+
+}
+
+debug_write() {
+
+    local msg="$1"
+    
+    # SOLO si debug está activo O si es un error crítico
+    debug_is_active || return 0
+    
+    [ -z "$msg" ] && return
+    
+    # Verificar que el log esté inicializado
+    if [ ! -f "$DEBUG_LOG" ]; then
+        debug_init_log
+    fi
+    
+    # Escribir al log
+    if [ -f "$DEBUG_LOG" ]; then
+        printf "[%s] [%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$VERSION" "$msg" >> "$DEBUG_LOG"
+        debug_rotate_logs_by_size
+    fi
+}
+
+debug() {
+
+    debug_is_active || return 0
+    
+    local cmd="$@"
+    debug_write "EXEC: $cmd"
+    
+    local output
+    output=$(sh -c "$cmd" 2>&1)
+    local exitcode=$?
+    
+    if [ $exitcode -eq 0 ]; then
+    
+        echo "$output" | while read -r line; do
+            debug_write "  $line"
+        done
+    
+    else
+    
+        debug_write "ERROR ($exitcode):"
+        echo "$output" | while read -r line; do
+    
+            debug_write "  $line"
+    
+        done
+    fi
+    
+    return $exitcode
+}
+
+
+debug_rotate_logs_by_size() {
+
+    [ ! -f "$DEBUG_LOG" ] && return
+
+    local size=$(wc -c < "$DEBUG_LOG")
+    local max_size=$((1024 * $DEBUG_LOG_MAX_SIZE))
+
+    if [ $size -gt $max_size ]; then
+
+        local old_num=1
+        while [ -f "$DEBUG_PATH/wg-autoconf-OLD-$old_num.log" ]; do
+            old_num=$((old_num + 1))
+        done
+
+        mv "$DEBUG_LOG" "$DEBUG_PATH/wg-autoconf-OLD-$old_num.log"
+
+        debug_init_log
+        debug_write "Log rotated to OLD-$old_num"
+    fi
+
+}
+
+debug_show() {
+
+    if [ -f "$DEBUG_LOG" ]; then
+        cat "$DEBUG_LOG"
+    else
+        error "Logs not found: $DEBUG_LOG !"
+    fi
+}
+
+debug_show_live() {
+
+    if ! debug_is_active; then
+        error "Debug is not active. Use: wg-autoconf debug on"
+    fi
+
+    if [ -f "$DEBUG_LOG" ]; then
+        tail -f "$DEBUG_LOG"
+    else
+        error "Logs not found: $DEBUG_LOG !"
+    fi
+}
+
+debug_clear() {
+
+    # VERIFY STATE
+    if [ "$(debug_state_read)" = "1" ]; then
+
+        error "Debug session already active. Use: wg-autoconf debug off"
+
+    fi
+
+    echo ""
+    local old_count=$(find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null | wc -l)
+
+    warning "This action is destructive:"
+    echo ""
+
+    # CURRENT
+    if [ -f "$DEBUG_LOG" ]; then
+
+        local size=$(du -h "$DEBUG_LOG" | awk '{print $1}')
+        echo "  $DEBUG_LOG - Current log ($size)"
+
+    fi
+
+
+    # OLDS
+    if [ $old_count -gt 0 ]; then
+
+        find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null |
+
+        while read -r file; do
+            local size=$(du -h "$file" | awk '{print $1}')
+            echo "  $file - Old file ($size)"
+        done
+
+    fi
+
+    if [ ! -f "$DEBUG_LOG" ] && [ $old_count -eq 0 ]; then
+
+        warning "  No log files found!"
+        return 0
+
+    fi
+
+    echo ""
+
+    printf "${YELLOW}Continue? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+    read -r confirm
+    case "$confirm" in
+        y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
+            rm -f "$DEBUG_LOG" "$DEBUG_PATH/wg-autoconf-OLD-"*.log 2>/dev/null
+            success "Debug logs cleared!"
+            ;;
+        *)
+            log "Cancelled by the user!"
+            ;;
+    esac
+}
+
+debug_status() {
+
+    echo ""
+    ui_lines 50 "${YELLOW}DEBUG STATUS${NC}"
+    echo ""
+
+    local state=$(debug_state_read)
+
+    if [ "$state" = "1" ]; then
+        echo -e "${YELLOW}Status:${NC}           ${GREEN}ACTIVE${NC}"
+    else
+        echo -e "${YELLOW}Status:${NC}           ${RED}INACTIVE${NC}"
+    fi
+
+    echo -e "${YELLOW}Log path/file:    $DEBUG_LOG${NC}"
+    echo ""
+
+
+    # (GET AND) SHOW SIZES
+    if [ -f "$DEBUG_LOG" ]; then
+
+        local size=$(du -h "$DEBUG_LOG" | awk '{print $1}')
+        local lines=$(wc -l < "$DEBUG_LOG")
+
+        echo -e "${YELLOW}Current log:${NC}      ${GREEN}$size ($lines lines)${NC}"
+
+    else
+
+        echo -e "${YELLOW}Current log:${NC}      ${RED}Not created yet!${NC}"
+
+    fi
+
+
+    # SHOW OLD's SIZES if
+    local old_count=$(find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null | wc -l)
+
+    if [ $old_count -gt 0 ]; then
+
+        echo -e "${YELLOW}Old logs:${NC}         ${GREEN}$old_count file(s)${NC}"
+
+        find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null |
+
+        while read -r file; do
+
+            local size=$(du -h "$file" | awk '{print $1}')
+
+            echo -e "  ${YELLOW}$(basename "$file"):${NC} ${GREEN}$size${NC}"
+
+        done
+
+    else
+        echo -e "${YELLOW}Old logs:         None${NC}"
+    fi
+
+    echo ""
+    ui_lines 50
+}
+
+debug_on() {
+
+    # 1. VERITY
+    if debug_is_active; then
+        warning "Debug is already active"
+        return 0
+    fi
+
+    # 2. STATE
+    debug_state_write "1"
+    debug_init_log
+
+    debug_write "Debug mode activated by $(id -un)@$(cat /proc/sys/kernel/hostname)"
+
+    # 3. RESULTS
+    success "Debug activated!"
+    echo ""
+    echo -e "${YELLOW}Log file:${NC}         $DEBUG_LOG"
+    echo ""
+    echo -e "Now you can tail in another terminal:"
+    echo -e "   ${GREEN}wg-autoconf debug live${NC}"
+}
+
+debug_off() {
+
+
+    # 1. VERIFY
+    if ! debug_is_active; then
+
+        warning "Debug is already inactive"
+        return 0
+
+    fi
+
+    # 2. STATE
+    debug_write "Debug mode deactivated by $(id -un)@$(cat /proc/sys/kernel/hostname)"
+    debug_state_write "0"
+
+
+    # RESULTS
+    success "Debug deactivated!"
+}
+
+debug_handler() {
+
+    local action="$1"
+
+    case "$action" in
+        on)
+            debug_on
+            ;;
+        off)
+            debug_off
+            ;;
+        show)
+            debug_show
+            ;;
+        live)
+            debug_show_live
+            ;;
+        clear)
+            debug_clear
+            ;;
+        status)
+            debug_status
+            ;;
+        states)
+            cat /usr/libexec/wg-autoconf/states
+            ;;
+        network)
+            cat /etc/config/network
+            ;;
+        dhcp)
+            cat /etc/config/dhcp
+            ;;
+        firewall)
+            cat /etc/config/firewall
+            ;;
+        tables)
+            cat /etc/iproute2/rt_tables
+            ;;
+        backups)
+            ls -Rla /etc/config/*.BACKUP_PRE_WIREGUARD | awk -v YB="\033[1;33m" -v GN="\033[0;32m" -v NC="\033[0m" '{print YB " DATE:" NC "\t", $6, $7, $8, YB " - FILE: " NC GN $9 NC}'
+            ;;
+        *)
+            error "${YELLOW}Usage: ${GREEN}wg-autoconf debug${NC} [${BLUE}on | off| show | live | clear | status | states | tables | network | dhcp | firewall${NC}]"
+            ;;
+    esac
+}
+
+
+
+
+
+
 
 # ###########################################################
 # ██╗   ██╗██████╗██████╗ █████╗██╗   ██╗ █████╗██╗    ██████╗███████╗
@@ -6219,6 +6577,251 @@ upgrade_app() {
 # Return: 0 on success, 1 if file already exists or mkdir fails
 #
 #####################################################################
+#####################################################################
+# STATE_SAFETY - Verify state file integrity and consistency
+#
+# Performs comprehensive validation of the state file:
+#   1. Checks if state file exists
+#   2. Verifies first line is exactly "IS_INSTALLED=1"
+#   3. Checks IS_PREV_TO_UPGRADE flag (must be 0)
+#   4. Checks IS_UPGRADED flag (must be 0)
+#
+# This function should be called at the beginning of all critical
+# operations (setup, up, down, remove, routes, nuke) to ensure
+# state file integrity before proceeding.
+#
+# Params: None
+# Return: 0 on success (all checks pass), 1 on failure
+# Exit: 1 on critical errors (with appropriate error message)
+#
+#####################################################################
+#####################################################################
+# STATE_SAFETY - Verify state file integrity and consistency
+#
+# Performs comprehensive validation of the state file:
+#   1. Checks if state file exists - if not, triggers _corrupted()
+#   2. Verifies first line is exactly "IS_INSTALLED=1" - if not, _corrupted()
+#   3. Checks IS_PREV_TO_UPGRADE flag:
+#      - If missing/corrupted → _corrupted()
+#      - If =1 → calls upgrade_avoid_garbage()
+#      - If =0 → OK, continue
+#   4. Checks IS_UPGRADED flag:
+#      - If missing/corrupted → _corrupted()
+#      - If =1 → shows notice, auto-resets to 0
+#      - If =0 → OK, continue
+#
+#####################################################################
+
+state_safety() {
+
+    
+    # 0.    CORRUPTED CASES
+    _corrupted() {
+    
+        echo ""
+        ui_lines 79 "${RED}STATE FILE CORRUPTED${NC}"
+        echo ""
+        warning "State file has invalid format or is corrupted!"
+        echo ""
+
+        verbose echo -e "   ${YELLOW}This usually indicates:${NC}"
+        verbose echo -e "     - Manual editing of state file (${RED}NEVER DO THIS${NC})"
+        verbose echo -e "     - File corruption due to improper shutdown"
+        verbose echo -e "     - Incomplete upgrade or installation"
+        verbose echo -e "     - Filesystem corruption or overlay issues"
+        verbose echo ""
+        verbose echo -e "   ${YELLOW}CRITICAL:${NC} ${RED}This state file cannot be trusted or recovered${NC}"
+        verbose echo -e "   ${YELLOW}ACTION REQUIRED:${NC} ${GREEN}A COMPLETE CLEANUP IS NECESSARY${NC}"
+        verbose echo ""
+        echo -e "   ${BLUE}wg-autoconf will now perform a FULL CLEANUP:${NC}"
+        echo ""
+        echo -e "   ${YELLOW}  THIS WILL RESET ALL EXISTING WIREGUARD CONFIGURATIONS ${NC}"
+        echo -e "   ${YELLOW}   Any active VPN connections will be terminated${NC}"
+        echo ""
+        
+        printf "${YELLOW}Proceed with FULL CLEANUP? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
+        read -r confirm
+        case "$confirm" in
+            y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
+
+                
+                debug_write "[STATE SAFETY] User confirmed NUKE operation to recover corrupted state"
+
+                echo ""
+                verbose log "${BLUE}Initiating FULL CLEANUP to recover from corrupted states ...${NC}"
+                
+                cleanup "nuke" "" "silent"
+                
+                if [ -f "$STATE_FILE" ] && [ "$(head -1 "$STATE_FILE" 2>/dev/null)" = "IS_INSTALLED=1" ]; then
+                    
+                    debug_write "[STATE SAFETY] New valid state file created!"
+
+                    success "State file successfully recreated!"
+                    echo ""
+                    log "${GREEN}System is now clean and ready for fresh WireGuard setup${NC}"
+                    echo ""
+                    
+                    return 0
+                
+                else
+                    
+                    debug_write "[STATE SAFETY CRITICAL] State file still invalid after NUKE"
+
+                    warning "${RED}CRITICAL${NC}: Failed to recreate state file even after NUKE!"
+                    echo ""
+                    echo -e "   ${RED}This indicates a deeper system problem:${NC}"
+                    echo -e "     - Filesystem may be read-only or corrupted"
+                    echo -e "     - $STATE_DIR may have incorrect permissions"
+                    echo -e "     - Overlay filesystem issues"
+                    echo ""
+                    echo -e "   ${YELLOW}Manual intervention required:${NC}"
+                    echo -e "     ${GREEN}1.${NC} Check filesystem: ${YELLOW}mount | grep overlay${NC}"
+                    echo -e "     ${GREEN}2.${NC} Check permissions: ${YELLOW}ls -la $STATE_DIR${NC}"
+                    echo -e "     ${GREEN}3.${NC} Try manual cleanup: ${YELLOW}rm -f $STATE_FILE${NC}"
+                    echo -e "     ${GREEN}4.${NC} Reinstall: ${YELLOW}apk remove --purge wg-autoconf && apk add wg-autoconf${NC}"
+                    echo ""
+                    
+                    return 1
+                fi
+                ;;
+            *)
+
+                debug_write "[STATE SAFETY] User cancelled NUKE operation, cannot proceed with corrupted state"
+                
+                echo ""
+                warning "FULL CLEANUP cancelled by user"
+                echo ""
+                echo -e "   ${YELLOW}Cannot continue with corrupted state file${NC}"
+                echo -e "   ${YELLOW}Run '${GREEN}wg-autoconf nuke${YELLOW}' manually to reset${NC}"
+                echo ""
+                
+                return 1
+                ;;
+        esac
+    }
+
+    debug_write "[STATE SAFETY] Starting state file verification"
+
+    
+
+    # 1 IF EXIST
+    if [ ! -f "$STATE_FILE" ]; then
+        
+        debug_write "[STATE SAFETY] State file DOES NOT EXIST: $STATE_FILE"
+        _corrupted
+        
+        return $?
+    
+    fi
+
+    
+    # 2.    IF FIRST LINE IS EXACTLY "IS_INSTALLED=1"
+    local first_line=$(head -1 "$STATE_FILE" 2>/dev/null | tr -d '\r\n')
+    
+    if [ "$first_line" != "IS_INSTALLED=1" ]; then
+        
+        debug_write "[STATE SAFETY] Invalid first line: '$first_line'"
+        
+        _corrupted
+        return $?
+    
+    else
+        
+        debug_write "[STATE SAFETY] First line verification passed: IS_INSTALLED=1"
+    
+    fi
+
+    
+
+
+    # 3.    IF IS_PREV_TO_UPGRADE FLAG
+    local prev_upgrade=$(state_read "IS_PREV_TO_UPGRADE" 2>/dev/null)
+    
+    if [ -z "$prev_upgrade" ]; then
+        
+        debug_write "[STATE SAFETY] IS_PREV_TO_UPGRADE not found"
+        
+        _corrupted
+        return $?
+    
+    elif [ "$prev_upgrade" = "1" ]; then
+        
+        debug_write "[STATE SAFETY] IS_PREV_TO_UPGRADE = 1 - Calling upgrade_avoid_garbage"
+        
+        upgrade_avoid_garbage
+        
+    
+    elif [ "$prev_upgrade" = "0" ]; then
+        
+        debug_write "[STATE SAFETY] IS_PREV_TO_UPGRADE verification passed: 0"
+    
+    else
+        
+        debug_write "[STATE SAFETY] IS_PREV_TO_UPGRADE invalid value: '$prev_upgrade'"
+        _corrupted
+        return $?
+    
+    fi
+
+    
+    
+
+    # 4.    IF IS_UPGRADED FLAG
+    local upgraded=$(state_read "IS_UPGRADED" 2>/dev/null)
+    
+    if [ -z "$upgraded" ]; then
+        
+        debug_write "[STATE SAFETY] IS_UPGRADED not found"
+        
+        _corrupted
+        return $?
+    
+    elif [ "$upgraded" = "1" ]; then
+        
+        debug_write "[STATE SAFETY] IS_UPGRADED = 1, Post-upgrade state detected"
+        
+        echo ""
+        ui_lines 79 "${YELLOW}POST-UPGRADE STATE DETECTED${NC}"
+        echo ""
+        warning "System is in post-upgrade state!"
+        echo ""
+        verbose echo -e "   ${YELLOW}This means:${NC}"
+        verbose echo -e "     - wg-autoconf was upgraded while WireGuard was active"
+        verbose echo -e "     - Your VPN connections may still be running"
+        verbose echo -e "     - ${RED}Configuration state may be inconsistent${NC}"
+        verbose echo ""
+        echo -e "   ${BLUE}wg-autoconf will now:${NC}"
+        echo -e "     ${GREEN}1.${NC} Reset to a normal upgrade state"
+        echo -e "     ${GREEN}2.${NC} ${YELLOW}IMPORTANT: Flag reset does NOT fix potential configuration issues${NC}"
+        echo ""
+        echo -e "   ${YELLOW}RECOMMENDED:${NC}"
+        echo -e "     - Terminate all active WireGuard connections"
+        echo -e "     - Run '${GREEN}wg-autoconf nuke${YELLOW}' for complete cleanup"
+        echo -e "     - Re-setup your VPN connections from scratch"
+        echo ""
+        ui_lines 79
+        echo ""
+        
+        debug_write "[STATE SAFETY] Auto-resetting IS_UPGRADED from 1 to 0"
+        state_write "IS_UPGRADED" "0" 2>/dev/null
+        
+    
+    elif [ "$upgraded" = "0" ]; then
+        
+        debug_write "[STATE SAFETY] IS_UPGRADED verification passed: 0"
+    
+    else
+        
+        debug_write "[STATE SAFETY] IS_UPGRADED invalid value: '$upgraded'"
+        _corrupted
+        return $?
+    fi
+
+    debug_write "[STATE SAFETY] All state file checks passed successfully"
+    return 0
+}
+
+
 state_init() {
 
     if [ ! -d "$STATE_DIR" ]; then
@@ -6965,361 +7568,22 @@ state_get_iface_state() {
 }
 
 
-###########################################################
+
+
+#####################################################################
 #
-# ██████╗ ███████╗██████╗ ██╗   ██╗ ██████╗
-# ██╔══██╗██╔════╝██╔══██╗██║   ██║██╔════╝
-# ██║  ██║█████╗  ██████╔╝██║   ██║██║  ███╗
-# ██║  ██║██╔══╝  ██╔══██╗██║   ██║██║   ██║
-# ██████╔╝███████╗██████╗╚██████╔╝╚███████═╝
-# ╚═════╝ ╚══════╝╚═════╝ ╚═════╝  ╚═════╝
+# ██████╗ ██████╗ ███████╗    ██╗███╗   ██╗██╗████████╗
+# ██╔══██╗██╔══██╗██╔════╝    ██║████╗  ██║██║╚══██╔══╝
+# ██████╔╝██████╔╝█████╗      ██║██╔██╗ ██║██║   ██║   
+# ██╔═══╝ ██╔══██╗██╔══╝      ██║██║╚██╗██║██║   ██║   
+# ██║     ██║  ██║███████╗    ██║██║ ╚████║██║   ██║   
+# ╚═╝     ╚═╝  ╚═╝╚══════╝    ╚═╝╚═╝  ╚═══╝╚═╝   ╚═╝  
 #
-###########################################################
-
-###########################################################
-# DEBUG LOGGING SYSTEM
-###########################################################
-
-debug_init_log() {
-
-    mkdir -p "$DEBUG_PATH" 2>/dev/null || return 1
-
-    if [ ! -f "$DEBUG_LOG" ]; then
-        cat > "$DEBUG_LOG" << EOF
-===[ wg-autoconf $VERSION DEBUG LOG ]=======================
-Started: $(date '+%Y-%m-%d %H:%M:%S')
-=============================================================
-
-EOF
-    fi
-}
-
-debug_state_read() {
-
-    if [ -f "$DEBUG_PATH/debug-state" ]; then
-        cat "$DEBUG_PATH/debug-state"
-    else
-        echo "0"
-    fi
-
-}
-
-debug_state_write() {
-
-    local state="$1"
-    mkdir -p "$DEBUG_PATH" 2>/dev/null
-    echo "$state" > "$DEBUG_PATH/debug-state"
-}
-
-debug_is_active() {
-
-    [ "$(debug_state_read)" = "1" ]
-
-}
-
-debug_write() {
-
-    local msg="$1"
-    
-    # SOLO si debug está activo O si es un error crítico
-    debug_is_active || return 0
-    
-    [ -z "$msg" ] && return
-    
-    # Verificar que el log esté inicializado
-    if [ ! -f "$DEBUG_LOG" ]; then
-        debug_init_log
-    fi
-    
-    # Escribir al log
-    if [ -f "$DEBUG_LOG" ]; then
-        printf "[%s] [%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$VERSION" "$msg" >> "$DEBUG_LOG"
-        debug_rotate_logs_by_size
-    fi
-}
-
-debug() {
-
-    debug_is_active || return 0
-    
-    local cmd="$@"
-    debug_write "EXEC: $cmd"
-    
-    local output
-    output=$(sh -c "$cmd" 2>&1)
-    local exitcode=$?
-    
-    if [ $exitcode -eq 0 ]; then
-    
-        echo "$output" | while read -r line; do
-            debug_write "  $line"
-        done
-    
-    else
-    
-        debug_write "ERROR ($exitcode):"
-        echo "$output" | while read -r line; do
-    
-            debug_write "  $line"
-    
-        done
-    fi
-    
-    return $exitcode
-}
-
-
-debug_rotate_logs_by_size() {
-
-    [ ! -f "$DEBUG_LOG" ] && return
-
-    local size=$(wc -c < "$DEBUG_LOG")
-    local max_size=$((1024 * $DEBUG_LOG_MAX_SIZE))
-
-    if [ $size -gt $max_size ]; then
-
-        local old_num=1
-        while [ -f "$DEBUG_PATH/wg-autoconf-OLD-$old_num.log" ]; do
-            old_num=$((old_num + 1))
-        done
-
-        mv "$DEBUG_LOG" "$DEBUG_PATH/wg-autoconf-OLD-$old_num.log"
-
-        debug_init_log
-        debug_write "Log rotated to OLD-$old_num"
-    fi
-
-}
-
-debug_show() {
-
-    if [ -f "$DEBUG_LOG" ]; then
-        cat "$DEBUG_LOG"
-    else
-        error "Logs not found: $DEBUG_LOG !"
-    fi
-}
-
-debug_show_live() {
-
-    if ! debug_is_active; then
-        error "Debug is not active. Use: wg-autoconf debug on"
-    fi
-
-    if [ -f "$DEBUG_LOG" ]; then
-        tail -f "$DEBUG_LOG"
-    else
-        error "Logs not found: $DEBUG_LOG !"
-    fi
-}
-
-debug_clear() {
-
-    # VERIFY STATE
-    if [ "$(debug_state_read)" = "1" ]; then
-
-        error "Debug session already active. Use: wg-autoconf debug off"
-
-    fi
-
-    echo ""
-    local old_count=$(find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null | wc -l)
-
-    warning "This action is destructive:"
-    echo ""
-
-    # CURRENT
-    if [ -f "$DEBUG_LOG" ]; then
-
-        local size=$(du -h "$DEBUG_LOG" | awk '{print $1}')
-        echo "  $DEBUG_LOG - Current log ($size)"
-
-    fi
-
-
-    # OLDS
-    if [ $old_count -gt 0 ]; then
-
-        find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null |
-
-        while read -r file; do
-            local size=$(du -h "$file" | awk '{print $1}')
-            echo "  $file - Old file ($size)"
-        done
-
-    fi
-
-    if [ ! -f "$DEBUG_LOG" ] && [ $old_count -eq 0 ]; then
-
-        warning "  No log files found!"
-        return 0
-
-    fi
-
-    echo ""
-
-    printf "${YELLOW}Continue? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
-    read -r confirm
-    case "$confirm" in
-        y|Y|yes|YES|Yes|okidoki|OKIDOKI|Okidoki|OkiDoki)
-            rm -f "$DEBUG_LOG" "$DEBUG_PATH/wg-autoconf-OLD-"*.log 2>/dev/null
-            success "Debug logs cleared!"
-            ;;
-        *)
-            log "Cancelled by the user!"
-            ;;
-    esac
-}
-
-debug_status() {
-
-    echo ""
-    ui_lines 50 "${YELLOW}DEBUG STATUS${NC}"
-    echo ""
-
-    local state=$(debug_state_read)
-
-    if [ "$state" = "1" ]; then
-        echo -e "${YELLOW}Status:${NC}           ${GREEN}ACTIVE${NC}"
-    else
-        echo -e "${YELLOW}Status:${NC}           ${RED}INACTIVE${NC}"
-    fi
-
-    echo -e "${YELLOW}Log path/file:    $DEBUG_LOG${NC}"
-    echo ""
-
-
-    # (GET AND) SHOW SIZES
-    if [ -f "$DEBUG_LOG" ]; then
-
-        local size=$(du -h "$DEBUG_LOG" | awk '{print $1}')
-        local lines=$(wc -l < "$DEBUG_LOG")
-
-        echo -e "${YELLOW}Current log:${NC}      ${GREEN}$size ($lines lines)${NC}"
-
-    else
-
-        echo -e "${YELLOW}Current log:${NC}      ${RED}Not created yet!${NC}"
-
-    fi
-
-
-    # SHOW OLD's SIZES if
-    local old_count=$(find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null | wc -l)
-
-    if [ $old_count -gt 0 ]; then
-
-        echo -e "${YELLOW}Old logs:${NC}         ${GREEN}$old_count file(s)${NC}"
-
-        find "$DEBUG_PATH" -name "wg-autoconf-OLD-*.log" 2>/dev/null |
-
-        while read -r file; do
-
-            local size=$(du -h "$file" | awk '{print $1}')
-
-            echo -e "  ${YELLOW}$(basename "$file"):${NC} ${GREEN}$size${NC}"
-
-        done
-
-    else
-        echo -e "${YELLOW}Old logs:         None${NC}"
-    fi
-
-    echo ""
-    ui_lines 50
-}
-
-debug_on() {
-
-    # 1. VERITY
-    if debug_is_active; then
-        warning "Debug is already active"
-        return 0
-    fi
-
-    # 2. STATE
-    debug_state_write "1"
-    debug_init_log
-
-    debug_write "Debug mode activated by $(id -un)@$(cat /proc/sys/kernel/hostname)"
-
-    # 3. RESULTS
-    success "Debug activated!"
-    echo ""
-    echo -e "${YELLOW}Log file:${NC}         $DEBUG_LOG"
-    echo ""
-    echo -e "Now you can tail in another terminal:"
-    echo -e "   ${GREEN}wg-autoconf debug live${NC}"
-}
-
-debug_off() {
-
-
-    # 1. VERIFY
-    if ! debug_is_active; then
-
-        warning "Debug is already inactive"
-        return 0
-
-    fi
-
-    # 2. STATE
-    debug_write "Debug mode deactivated by $(id -un)@$(cat /proc/sys/kernel/hostname)"
-    debug_state_write "0"
-
-
-    # RESULTS
-    success "Debug deactivated!"
-}
-
-debug_handler() {
-
-    local action="$1"
-
-    case "$action" in
-        on)
-            debug_on
-            ;;
-        off)
-            debug_off
-            ;;
-        show)
-            debug_show
-            ;;
-        live)
-            debug_show_live
-            ;;
-        clear)
-            debug_clear
-            ;;
-        status)
-            debug_status
-            ;;
-        states)
-            cat /usr/libexec/wg-autoconf/states
-            ;;
-        network)
-            cat /etc/config/network
-            ;;
-        dhcp)
-            cat /etc/config/dhcp
-            ;;
-        firewall)
-            cat /etc/config/firewall
-            ;;
-        tables)
-            cat /etc/iproute2/rt_tables
-            ;;
-        backups)
-            ls -Rla /etc/config/*.BACKUP_PRE_WIREGUARD | awk -v YB="\033[1;33m" -v GN="\033[0;32m" -v NC="\033[0m" '{print YB " DATE:" NC "\t", $6, $7, $8, YB " - FILE: " NC GN $9 NC}'
-            ;;
-        *)
-            error "${YELLOW}Usage: ${GREEN}wg-autoconf debug${NC} [${BLUE}on | off| show | live | clear | status | states | tables | network | dhcp | firewall${NC}]"
-            ;;
-    esac
-}
-
-
+#####################################################################
+
+# 1. UNCONDITIONALS 
+load_user_settings
+state_safety
 
 
 
