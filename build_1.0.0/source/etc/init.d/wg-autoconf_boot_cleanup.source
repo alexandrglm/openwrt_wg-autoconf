@@ -1,10 +1,12 @@
 #!/bin/ash /etc/rc.common
 # wg-autoconf_boot_cleanup 1.0.0-r1
+
+
 START=93
 
 start() {
 
-    # 1)    BOOTUP NUKE
+    # 1)    BOOTUP NUKE -> if binary exists, let it do the work
     if [ -x /usr/bin/wg-autoconf ]; then
 
         if /usr/bin/wg-autoconf nuke 2>/dev/null; then
@@ -26,80 +28,180 @@ start() {
 
 
     # 2)    EMERGENCY FALLBACK
-    # 2.1   IFACES CLEANUP
-    echo "[wg-autoconf_boot_cleanup] Cleaning WireGuard interfaces from ip link" > /dev/kmsg
+
+    # 2.1   INTERFACE CLEANUP --> remove ALL WireGuard interfaces
+    echo "[wg-autoconf_boot_cleanup EMERGENCY] Cleaning WireGuard interfaces from kernel" > /dev/kmsg
     
+    # 2.1.1 VIA IP
     for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z_-]*" | sort -u); do
         
-        if ip link show "$iface" 2>/dev/null | grep -q "state DOWN"; then
-        
-            ip link delete "$iface" 2>/dev/null && \
-                echo "[wg-autoconf_boot_cleanup] Removed interface: $iface" > /dev/kmsg
-        
-        else
-        
-            echo "[wg-autoconf_boot_cleanup] Skipping active interface: $iface" > /dev/kmsg
-        
-        fi
+        ip link delete "$iface" 2>/dev/null && \
+            
+            echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed interface: $iface" > /dev/kmsg
     
     done
     
-    # 2.2 UCI SETS CLEANUP
+    
+    # 2.1.2   VIA UCI
     echo "[wg-autoconf_boot_cleanup] Cleaning WireGuard configurations from UCI" > /dev/kmsg
     
+    # 2.1.2.1    UCI NETWKORK IFACES wg*
     uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | \
-    
     cut -d. -f2 | cut -d= -f1 | while read -r iface; do
     
         uci delete "network.$iface" 2>/dev/null
-        uci delete "network.${iface}_peer" 2>/dev/null 2>/dev/null
-    
-        echo "[wg-autoconf_boot_cleanup] Removed UCI config for: $iface" > /dev/kmsg
+        uci delete "network.${iface}_peer" 2>/dev/null
+        
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed UCI config for: $iface" > /dev/kmsg
     
     done
     
-    # 2.3 RT_TABLES CLEANUP
-    echo "[wg-autoconf_boot_cleanup] Cleaning routing tables" > /dev/kmsg
+    # 2.1.2.2    UCI FIREWALL IFACES wg*
+    uci show firewall 2>/dev/null | grep "firewall\.@zone\[[0-9]\].name='wg'" | \
     
-    grep -E "^[0-9]+\s+[^_]+_vpn_wg[^_]+" /etc/iproute2/rt_tables 2>/dev/null | while read -r line; do
+    while read -r line; do
+        
+        zone_index=$(echo "$line" | cut -d. -f2 | tr -d '[]')
+        
+        uci delete "firewall.@zone[$zone_index]" 2>/dev/null
+        
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed firewall zone index: $zone_index" > /dev/kmsg
     
-        table_name=$(echo "$line" | awk '{print $2}')
+    done
+    
+    # 2.1.2.3    UCI FIREWALL FORWARDINGS wg*
+    uci show firewall 2>/dev/null | grep "firewall\.@forwarding\[[0-9]\].src='wg'" | \
+    while read -r line; do
         
-        lan_iface=$(echo "$table_name" | sed 's/\(.*\)_vpn_wg.*/\1/')
+        fwd_index=$(echo "$line" | cut -d. -f2 | tr -d '[]')
         
-        if [ -n "$lan_iface" ]; then
+        uci delete "firewall.@forwarding[$fwd_index]" 2>/dev/null
+    
+    done
+    
+    # 2.1.2.4    UCI DHCP wg
+    uci show dhcp 2>/dev/null | grep "dhcp\.wg" | cut -d. -f2 | cut -d= -f1 | while read -r dhcp_cfg; do
+        
+        uci delete "dhcp.$dhcp_cfg" 2>/dev/null
+        
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed DHCP config: $dhcp_cfg" > /dev/kmsg
+    
+    done
+    
+    # 2.2 PRE UCI COMMITS
+    uci commit network 2>/dev/null
+    uci commit firewall 2>/dev/null
+    uci commit dhcp 2>/dev/null
+    
+    
+    # 2.3   ROUTING TABLE CLEANUP -> remove ALL wg_* and _vpn_* tables
+    echo "[wg-autoconf_boot_cleanup EMERGENCY] Cleaning routing tables" > /dev/kmsg
+    
+    # 2.3.1 RT_TABLES wg* | _vpn_*
+    local all_tables=$(grep -E '^[0-9]+[[:space:]]+(wg|_vpn_)' /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
+    
+    for table in $all_tables; do
+        
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] Removing table: $table" > /dev/kmsg
+        
+        # 2.3.1.1   GET ID
+        local table_id=$(grep "[[:space:]]$table$" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $1}')
+        
+        # 2.3.1.2  FLUSH BEFORE!!!! BEFORE!!!
+        [ -n "$table_id" ] && ip route flush table "$table_id" 2>/dev/null
+        
+        # 2.3.1.3 REMOVE FROM RT_
+        sed -i "/^[0-9]\+[[:space:]]\+${table}$/d" /etc/iproute2/rt_tables 2>/dev/null
+    done
+    
 
-            lan_ip=$(uci get "network.$lan_iface.ipaddr" 2>/dev/null || \
-                     ip -4 addr show "$lan_iface" 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | head -1)
-            
-            if [ -n "$lan_ip" ]; then
 
-                local cidr=24
-                
-                if echo "$lan_ip" | grep -q '\.'; then
-                
-                    subnet="${lan_ip%.*}.0/$cidr"
-                
-                else
-                    continue
-                fi
-                
-                ip rule del from "$subnet" lookup "$table_name" 2>/dev/null
-                ip rule del from "$subnet" to "$subnet" lookup main 2>/dev/null
-                ip route flush table "$table_name" 2>/dev/null
-                
-                echo "[wg-autoconf_boot_cleanup] Cleaned routing for table: $table_name (LAN: $lan_iface)" > /dev/kmsg
-            fi
+    # 2.3.2 ORPHANED 1 -> RT_TABLES BUT NO NAME (ID; as kernel does)
+    local all_table_ids=$(ip route show table all 2>/dev/null | \
+                          grep -E 'table [0-9]+' | \
+                          sed 's/.*table \([0-9]\+\).*/\1/' | \
+                          sort -u)
+    
+    
+    for tid in $all_table_ids; do
+        
+        # 2.3.1.    CHECK IF ID HAS NAME IN RT_TABLES
+        local table_name=$(grep "^$tid[[:space:]]" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
+        
+        # 2.3.1.2 NO NAME? ORPHANED ->  FLUSH
+        if [ -z "$table_name" ] || ! echo "$table_name" | grep -E '^(wg|_vpn_)' >/dev/null; then
             
-            sed -i "/^[0-9]\+[[:space:]]\+${table_name}$/d" /etc/iproute2/rt_tables 2>/dev/null
+            echo "[wg-autoconf_boot_cleanup EMERGENCY] Flushing orphaned table ID: $tid" > /dev/kmsg
+            
+            ip route flush table "$tid" 2>/dev/null
+        
         fi
     
     done
     
-    # 2.4   BACKUP FILES (NO CHECKSUMS APPLIES HERE)
-    echo "[wg-autoconf_boot_cleanup] Restoring configuration backups" > /dev/kmsg
+    
+    # 2.4   ORPAHNED 2 -> IP RULES CLEANUP for ALL ORPG RULES
+    echo "[wg-autoconf_boot_cleanup] Cleaning orphaned IP rules" > /dev/kmsg
+    
+    # 2.4.1     IP RULE SHOW BY wg|_vpn? -> IP RULE DEL PRIOR
+    ip rule show | grep -E "lookup (wg|_vpn_)" | while read rule; do
+        
+        local priority=$(echo "$rule" | awk '{print $1}' | sed 's/://')
+        
+        ip rule del priority "$priority" 2>/dev/null
+        
+        echo "[wg-autoconf_boot_cleanu EMERGENCY] Removed rule priority $priority" > /dev/kmsg
+    
+    done
+    
+    # 2.4.2 IP RULE SHOW BY ID? ORPHANED (AS KERNEL DOES)
+    ip rule show | grep "lookup [0-9]\+" | while read rule; do
+        
+        local priority=$(echo "$rule" | awk '{print $1}' | sed 's/://')
+        
+        local table_id=$(echo "$rule" | grep -o 'lookup [0-9]\+' | awk '{print $2}')
+        
+        # 2.4.2.1   CHECK RT_ AGAIN THEN DEL RULE BY PRIOR
+        if ! ip route show table "$table_id" 2>/dev/null | grep -q .; then
+            
+            ip rule del priority "$priority" 2>/dev/null
+            
+            echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed orphaned rule priority $priority (table $table_id)" > /dev/kmsg
+        
+        fi
+    
+    done
+    
+    
+    # 2.5   NFT CLEANUP
+    if command -v nft >/dev/null 2>&1; then
+        
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] Cleaning NFT chains" > /dev/kmsg
+        
+        # 2.5.1     FINC CHAINS
+        local wg_chains=$(nft list table inet fw4 2>/dev/null | \
+                          grep -o 'chain [a-zA-Z0-9_]*wg[a-zA-Z0-9_]*' | \
+                          sed 's/chain //' | sort -u)
+        
+        # 2.5.2 DEL CHAINS
+        for chain in $wg_chains; do
+            
+            nft delete chain inet fw4 "$chain" 2>/dev/null
+            
+            echo "[wg-autoconf_boot_cleanup EMERGENCY] Removed NFT chain: $chain" > /dev/kmsg
+        
+        done
+    
+    fi
+    
+    
+    # 2.6   RESTORE BACKUPS
+    echo "[wg-autoconf_boot_cleanup EMERGENCY] Restoring configuration backups" > /dev/kmsg
+    
     local restored=0
     
+
+    # 2.6.1 BACKUPS VERIFS
     for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
         
         [ -f "$backup" ] || continue
@@ -107,21 +209,27 @@ start() {
         original="${backup%.BACKUP_PRE_WIREGUARD}"
         config_name=$(basename "$original")
         
+        # 2.6.1.2   ID TAGS HEAD
         if head -1 "$backup" | grep -q "WG_AUTOCONF_BACKUP"; then
 
+            # 2.6.1.3 GET CONTENT NO TAGS
             if sed '1d; $d' "$backup" > "$original" 2>/dev/null; then
             
                 rm -f "$backup" 2>/dev/null
+                
                 restored=$((restored + 1))
+                
+                echo "[wg-autoconf_boot_cleanup EMERGENCY] Restored backup for: $config_name" > /dev/kmsg
             
-                echo "[wg-autoconf_boot_cleanup] Restored backup for: $config_name" > /dev/kmsg
-            
+
+            #2.6.2 RETAIN STRANGE CASES
             else
             
-                echo "[wg-autoconf_boot_cleanup] Failed to restore backup for: $config_name" > /dev/kmsg
+                echo "[wg-autoconf_boot_cleanup EMERGENCY] Failed to restore backup for: $config_name" > /dev/kmsg
             
             fi
         
+        # 2.6.3 RETAIN INVALIDS
         else
         
             echo "[wg-autoconf_boot_cleanup] Skipping invalid backup (missing tag): $(basename "$backup")" > /dev/kmsg
@@ -131,7 +239,7 @@ start() {
     done
     
     
-    # 2.5 COMMITS
+    # 2.7   FINAL UCI COMMITS/REALOADS
     if [ $restored -gt 0 ]; then
         
         echo "[wg-autoconf_boot_cleanup] Committing UCI changes ($restored configs restored)" > /dev/kmsg
@@ -139,23 +247,32 @@ start() {
         uci commit network 2>/dev/null
         uci commit dhcp 2>/dev/null
         uci commit firewall 2>/dev/null
+        
+        /etc/init.d/network reload 2>/dev/null
         sleep 1
         /etc/init.d/firewall reload 2>/dev/null && \
-            echo "[wg-autoconf_boot_cleanup] Firewall reloaded" > /dev/kmsg
+            echo "[wg-autoconf_boot_cleanup EMERGENCY] Firewall reloaded" > /dev/kmsg
     else
         
-        echo "[wg-autoconf_boot_cleanup] No backups to restore, skipping UCI commit" > /dev/kmsg
+        echo "[wg-autoconf_boot_cleanup EMERGENCY] No backups to restore, skipping UCI commit" > /dev/kmsg
     fi
     
+
     
+    # 2.8   STATES
+    echo "[wg-autoconf_boot_cleanup EMERGENCY] Cleaning state files" > /dev/kmsg
     
-    # 2.6 STATES / DEBUG LOGS 
-    echo "[wg-autoconf_boot_cleanup] Cleaning state and debug files" > /dev/kmsg
     rm -f /usr/libexec/wg-autoconf/states 2>/dev/null
-    # rm -f /usr/libexec/wg-autoconf/debug/wg-autoconf.log 2>/dev/null
-    # rm -f /usr/libexec/wg-autoconf/debug/wg-autoconf-OLD-*.log 2>/dev/null
     
-    echo "[wg-autoconf_boot_cleanup] Emergency boot cleanup completed" > /dev/kmsg
+    rm -f /usr/libexec/wg-autoconf/debug/debug-state 2>/dev/null
+    
+    # DEBUG!    Retain logs 
+    # rm -f /usr/libexec/wg-autoconf/debug/wg-autoconf.log 2>/dev/null
+    
+    
+    echo "[wg-autoconf_boot_cleanup EMERGENCY] Emergency boot cleanup completed" > /dev/kmsg
+    
+    return 0
 }
 
 stop() {
