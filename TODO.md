@@ -1,25 +1,50 @@
 ### 0.0.1-r7 -> 1.0.0 r1
 
-##### Functions
-- [ ] - Add wg servers setup/etc.. support.
 
-#### Devel -> Stage -> Finished
+#### NEXT/PENDING
+
+
+- [ ] - Add wg servers setup/etc.. support.
+- [ ] - Fix NFT CHAIN remnants when deactivate_interface when multiple ifaces enabled & routes (CMD_LOG_3...)
+
+####  Devel -> Debug -> Stage -> Finished
+- [ ] - Fix Disable colours setting. 
 - [ ] - Proceed with a deeper staging, tests EVERY error case, validation, multiple scenario
 - [ ] - Test multi-routing behaviour with every possible usecase-scenario.
 - [ ] - CPU cycles meassurement for ... ATOMIC OPERS, EACH LOOP (cleanup(), setup_, remove_, activate_ deactivate_).
 
+#### MANDOCS
+- [ ] - Create a full docs/tl;dr
+- [ ] - **Strongly consider re-implementing `websocket-shell-react` to provide a 'live test demo` for a plausible self-hosted wiki page**
 ---
+
+### Session 12 2026-02-16
+
+
+- [x] - Add new typo/colour functions:
+        + ITALIC, BOLD, UNDERLINE, REVERSE, STRIKE, DIM, BLINK
+        + MAGENTA, CYAN, WHITE, GREY
+- [X] - Add a more detailed help/docs vía `wg-autoconf docs`
+
+---
+
 #### Session 11 FULL CHANGELOG: 2026-02-12/17
 
 ##### Parser & Helpers
+- [X] - Update User Settings:
+        + Colours CLI ON/OFF
+        + Verbosity Always ON/OFF -> Upgrade verbose() to handle modes
+        + Default DNS, Allowed IPs, UDP Port
+
+- [X] - Update Debug functions: show, live, tables, chains, nft, state machine
 - [X] -  Fixed `get_uci_list()` to properly parse multiple UCI list values
 - [X] - Fixed `parse_endpoint()` with full IPv6 [bracket:style:ip]:: support
 - [X] - Re-written `process_allowed_ips()` to support-maintain-retain COMMA-SEPARATED / SPACE-SEPARATED as required
 - [X] - Created new helpers for setups/removal processes:
-     -  `add_routing_table()`
-     -  `del_routing_table()`
-     -  `add_ip_rule()`
-     -  `del_ip_rules_by_table()`
+     +  `add_routing_table()`
+     +  `del_routing_table()`
+     +  `add_ip_rule()`
+     +  `del_ip_rules_by_table()`
      -  [ ] - **PENDING: UPDATE DOCUMENTATION**
      
 ##### State Machine & System

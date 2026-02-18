@@ -64,6 +64,7 @@ DEFAULT_DNS="1.1.1.1, 1.0.0.1"
 DEFAULT_PORT=51820
 DEFAULT_ALLOW_IPS="0.0.0.0/0"
 DEFAULT_COLOURS=1
+DEFAULT_VERBOSE=0
 
 DEFAULT_TABLES="/etc/iproute2/rt_tables"
 
@@ -91,6 +92,7 @@ create_default_user_settings() {
         echo 'DEFAULT_PORT="51820"'
         echo 'DEFAULT_ALLOW_IPS="0.0.0.0/0"'
         echo 'DEFAULT_COLOURS="1"'
+        echo 'DEFAULT_VERBOSE="0"'
     } > "$USER_SETTINGS_FILE"
     
     chmod 644 "$USER_SETTINGS_FILE" 2>/dev/null
@@ -131,41 +133,69 @@ set_user_setting() {
         colours|colors|colour|color|COLORS|COLOURS|COLOR|COLORS)
             key="DEFAULT_COLOURS"
             ;;
-        *) key="DEFAULT_${key^^}"
-        ;;
+        verbose|verbosity|VERBOSE|VERBOSITY)
+            key="DEFAULT_VERBOSE"
+            ;;
+        *) 
+            key="DEFAULT_${key^^}"
+            ;;
     esac
     
-    # 2.    VALIDATIONS
+    # 2. VALIDATIONS
     case "$key" in
         DEFAULT_DNS) 
             validate_wg_config "manual" "" "DNS" "$value" || return 1 
             ;;
+
         DEFAULT_PORT) 
-            if ! echo "$value" | grep -qE '^[0-9]+$' || [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
-                
+            if ! echo "$value" | grep -qE '^[0-9]+$' || \
+            [ "$value" -lt 1 ] || \
+            [ "$value" -gt 65535 ]; then
                 error "Invalid port: $value"
+                return 1
             fi
             ;;
+
         DEFAULT_ALLOW_IPS)
             validate_wg_config "manual" "" "AllowedIPs" "$value" || return 1
             ;;
+
         DEFAULT_COLOURS)
             case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
-                0|off|no|false|disable|OFF|NO|FALSE|DISABLE)
+                0|off|no|false|disable)
                     value="0"
                     ;;
-                1|on|yes|true|enable|ON|YES|TRUE|ENABLE)
+                1|on|yes|true|enable)
                     value="1"
                     ;;
                 *)
                     error "Invalid colours value: '${YELLOW}$value${NC}' (use: 0/1, on/off, yes/no, true/false, enable/disable)"
+                    return 1
                     ;;
             esac
             ;;
+
+        DEFAULT_VERBOSE)
+            case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+                0|off|no|false|disable)
+                    value="0"
+                    ;;
+                1|on|yes|true|enable)
+                    value="1"
+                    ;;
+                *)
+                    wrning "Invalid verbose value: '${YELLOW}$value${NC}' (use: 0/1, on/off, yes/no, true/false, enable/disable)"
+                    return 1
+                    ;;
+            esac
+            ;;
+
         *)
-            error "Unknown setting: ${YELLOW}'$key'${NC}. Check available user settings: ${YELLOW}wg-autoconf settings ${GREEN}show${NC}" 
+            warning "Unknown setting: ${YELLOW}'$key'${NC}. Check available user settings: ${YELLOW}wg-autoconf settings ${GREEN}show${NC}" 
+            return 1
             ;;
     esac
+
     
     
     # 3. SAVE
@@ -191,8 +221,10 @@ set_user_setting() {
 }
 
 
+#####################################################################
+# LOAD USER SETTINGS - CORREGIDA
+#####################################################################
 load_user_settings() {
-
 
     # 1. LOAD
     [ ! -f "$USER_SETTINGS_FILE" ] && create_default_user_settings
@@ -203,7 +235,7 @@ load_user_settings() {
         key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         
-        # 1.2   BACKTIPS PARSER
+        # 1.2 BACKTIPS PARSER
         value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
         
         # 1.3 BY CASE
@@ -219,6 +251,9 @@ load_user_settings() {
                 ;;
             DEFAULT_COLOURS)
                 DEFAULT_COLOURS="$value"
+                ;;
+            DEFAULT_VERBOSE)
+                DEFAULT_VERBOSE="$value"   # ← CORREGIDO: no toca VERBOSE
                 ;;
         esac
     done < "$USER_SETTINGS_FILE"
@@ -243,23 +278,79 @@ load_user_settings() {
 # POSSIBLE FIX?: Remove colours ... or try tput in openwrt or ... idk
 
 if [ "$DEFAULT_COLOURS" = "1" ]; then
+
     RED='\033[1;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
+    MAGENTA='\033[0;35m'
+    CYAN='\033[0;36m'
+    WHITE='\033[1;37m'
+    GREY='\033[3;37m'
     NC='\033[0m'
+    
+    BOLD='\033[1m'
+    NB='\033[22m'
+
+    ITALIC='\033[3m'
+    NI='\033[23m'
+    
+    UNDERLINE='\033[4m'
+    NU='\033[24m'
+    
+    REVERSE='\033[7m'
+    NR='\033[27m'
+    
+    STRIKE='\033[9m'
+    NS='\033[29m'
+    
+    DIM='\033[2m'
+    ND='\033[22m'
+    
+    BLINK='\033[5m'
+    NK='\033[25m'
+    
 else
+
     RED=''
     GREEN=''
     YELLOW=''
     BLUE=''
+    MAGENTA=''
+    CYAN=''
+    WHITE=''
+    GREY=''
     NC=''
+    
+    BOLD=''
+    NB=''
+    ITALIC=''
+    NI=''
+    UNDERLINE=''
+    NU=''
+    REVERSE=''
+    NR=''
+    STRIKE=''
+    NS=''
+    DIM=''
+    ND=''
+    BLINK=''
+    NK=''
 fi
 
 log() { echo -e "${BLUE}[wg-autoconf]${NC} $1" >&2; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 success() { echo -e "${GREEN}[OK]${NC} $1" >&2; }
 warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
+
+bold() { echo -e "${BOLD}$*${NB}" >&2; }
+italic() { echo -e "${ITALIC}$*${NI}">&2; }
+underline() { echo -e "${UNDERLINE}$*${NU}">&2; }
+reverse() { echo -e "${REVERSE}$*${NR}" >&2; }
+strike() { echo -e "${STRIKE}$*${NS}" >&2; }
+dim() { echo -e "${DIM}$*${ND}" >&2; }
+blink() { echo -e "${BLINK}$*${NK}" >&2; }
+
 
 ui_lines() {
 
@@ -1819,11 +1910,15 @@ ip_to_network() {
 #   Use of "$@" to execute cmds may have quoting issues in older ash
 #   Complex arguments with spaces or special characters may not be preserved correctly
 #####################################################################
-# VERBOSE MODE
+#####################################################################
+# VERBOSE
 #####################################################################
 verbose() {
 
-    if [ "$VERBOSE" = "1" ]; then
+    # Check if verbose is enabled either by:
+    # 1. Global VERBOSE flag (from --verbose/-v command line)
+    # 2. DEFAULT_VERBOSE user setting (from user_settings file)
+    if [ "$VERBOSE" = "1" ] || [ "$DEFAULT_VERBOSE" = "1" ]; then
         "$@"
     fi
 }
@@ -1906,6 +2001,251 @@ show_usage() {
     exit 1
 }
 
+
+
+#####################################################################
+# SHOW SOMETHING LIKE A MANDOC
+#
+# DEBUG!
+# Main idea -> Include as an extensive mandoc but concise enough to serve as a guide
+# TODO: Improve!!
+show_minidoc() {
+    
+    # 0. HEADER
+    echo ""
+    ui_lines 80 "${GREEN}${BOLD}WireGuard Auto-Config${NB}${NC} - ${RED}$VERSION${NC} - ${UNDERLINE}FULL HELP${NU}"
+    echo ""
+    echo -e "   ${ITALIC}${BLUE}This is a full guide to all available commands and options${NI}${NC}"
+    echo ""
+
+    echo ""
+    echo -e " ${WHITE}${BOLD}// QUICK START //${NB}${NC}"
+    echo ""
+    echo -e "   ${YELLOW}${BOLD}wg-autoconf setup${NB}${NC} ${GREEN}${UNDERLINE}*${NU}${NC}                      ${ITALIC}${BLUE}> Create from /etc/wireguard/*.conf${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}wg-autoconf up${NB}${NC} ${GREEN}${UNDERLINE}<wg_*>${NU}${NC}                    ${ITALIC}${BLUE}> Activate interface${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}wg-autoconf routes set${NB}${NC} ${GREEN}${ITALIC}<wg_*> <dst>${NU}${NC}      ${ITALIC}${BLUE}> Route DSD INTERFACE via selected WG INTERFACE{NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}wg-autoconf status${NB}${NC}                       ${ITALIC}${BLUE}> Check WigeGuard status${NI}${NC}"
+    echo ""
+
+
+    # 1.    SETUP FLOW
+    echo ""
+    echo -e " ${WHITE}${BOLD}// CONFIGURATION MANAGEMENT //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Create and validate WireGuard configurations${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}list${NB}${NC}                                     ${ITALIC}${BLUE}> List all .conf files in /etc/wireguard${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}list${NB}${NC} ${GREEN}${UNDERLINE}<file>${NU}${NC}                              ${ITALIC}${BLUE}> Show content of specific .conf file${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}test${NB}${NC} ${GREEN}${UNDERLINE}<file>${NU}${NC}                              ${ITALIC}${BLUE}> Validate .conf syntax, keys, endpoints, DNS${NI}${NC}"
+    echo -e "                                               ${ITALIC} Shows final handshake capability without activating${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}setup${NB}${NC} ${GREEN}${UNDERLINE}<file>${NU}${NC}                             ${ITALIC}${BLUE}> Create UCI configuration from .conf${NI}${NC}"
+    echo -e "                                               ${ITALIC} Creates: wg_<file> interface + peer in UCI${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}manual${NB}${NC} ${GREEN}${UNDERLINE}[<file>]${NU}${NC}                          ${ITALIC}${BLUE}> Interactive configuration wizard${NI}${NC}"
+    echo -e "                                               ${ITALIC} Optional base .conf for defaults${NI}"
+    echo ""
+
+
+    # 2.    IFACE FLOW
+    echo ""
+    echo -e " ${WHITE}${BOLD}// INTERFACE LIFECYCLE //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Control WireGuard interfaces (create, activate, clean one, clean all, "destroy, but safely" )${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}up${NB}${NC} ${GREEN}${UNDERLINE}<wg_iface>${NU}${NC}                            ${ITALIC}${BLUE}> Create and enable interface if missing${NI}${NC}"
+    echo -e "                                               ${ITALIC} Loads private key, peers, IP from UCI${NI}"
+    echo -e "                                               ${ITALIC} Creates routing table ${UNDERLINE}<wg_iface>${NU}${ITALIC} for tunnel traffic${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}down${NB}${NC} ${GREEN}${UNDERLINE}<wg_iface>${NU}${NC}                          ${ITALIC}${BLUE}> Disable and remove interface from kernel${NI}${NC}"
+    echo -e "                                               ${ITALIC} Removes peers, flushes tables, deletes ${GREEN}${UNDERLINE}wg_*${NU}${ITALIC}${NC} tables${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}remove${NB}${NC} ${GREEN}${UNDERLINE}<wg_iface>${NU}${NC}                        ${ITALIC}${BLUE}> Delete UCI configuration and state${NI}${NC}"
+    echo -e "                                               ${ITALIC} Removes network/dhcp/firewall entries${NI}"
+    echo -e "                                               ${ITALIC} Preserves kernel interface (use ${YELLOW}${BOLD}down${NB}${ITALIC}${NC} first if needed)${NI}"
+    echo ""
+
+
+
+    # 3.    ROUTING FLOW
+    echo ""
+    echo -e " ${WHITE}${BOLD}// ROUTING & TRAFFIC CONTROL //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Policy routing to force LAN traffic through VPN${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}routes set${NB}${NC} ${GREEN}${UNDERLINE}<wg_iface> <dst_iface>${NU}${NC}        ${ITALIC}${BLUE}> Route a destiny interface/subnet via desired WG${NI}${NC}"
+    echo -e "                                              ${ITALIC} Creates table ${GREEN}_vpn_<wg>_<lan>${ITALIC}${NC} with:${NI}"
+    echo -e "                                                * ${GREEN}default dev <wg_iface>${NC}"
+    echo -e "                                                * ${GREEN}<lan_subnet> dev <lan_iface>${NC}"
+    echo -e "                                              ${ITALIC} Adds ip rules with priority ${GREEN}${UNDERLINE}<table_id> x10${NU}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}routes unset${NB}${NC} ${GREEN}${UNDERLINE}<wg_iface> <lan_iface>${NU}${NC}      ${ITALIC}${BLUE}> Remove DST routing${NI}${NC}"
+    echo -e "                                              ${ITALIC} Deletes table, flushes routes, removes ip rules${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}routes show${NB}${NC} ${GREEN}${UNDERLINE}[<wg_iface>]${NU}${NC}                 ${ITALIC}${BLUE}> Display all/specific routing tables${NI}${NC}"
+    echo -e "                                              ${ITALIC}Shows table contents and associated ip rules${NI}"
+    echo ""
+
+
+
+    # 4.    STATUS
+    echo ""
+    echo -e " ${WHITE}${BOLD}// STATUS & MONITORING //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Check interface state, handshake, traffic${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}status${NB}${NC} ${GREEN}${UNDERLINE}[<wg_iface>]${NU}${NC}                      ${ITALIC}${BLUE}> Show all/specific interface status${NI}${NC}"
+    echo -e "                                              ${ITALIC} Displays: UCI state, UP/DOWN, handshake,${NI}"
+    echo -e "                                              ${ITALIC} transfer, routes, backup validity${NI}"
+    echo ""
+
+
+
+    # 5.    BACKUP FLOW
+    echo ""
+    echo -e " ${WHITE}${BOLD}// BACKUP & RECOVERY$ //{NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Automatic backups of network/dhcp/firewall before changes${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}backups show${NB}${NC}                             ${ITALIC}${BLUE}> List all backups with validation status${NI}${NC}"
+    echo -e "                                              ${ITALIC} Shows: path, tag, size, date, valid/corrupted${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}backups restore${NB}${NC} ${GREEN}${UNDERLINE}<file>${NU}${NC}                   ${ITALIC}${BLUE}> Restore specific config (network/dhcp/firewall)${NI}${NC}"
+    echo -e "                                              ${ITALIC} Validates checksum before restoring${NI}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}backups diag${NB}${NC} ${GREEN}${UNDERLINE}[<file>]${NU}${NC}                    ${ITALIC}${BLUE}> Diagnose backup corruption issues${NI}${NC}"
+    echo -e "                                              ${ITALIC} Shows line count, checksums, content analysis${NI}"
+    echo ""
+
+
+
+    # 6.    CLEANUP
+    echo ""
+    echo -e " ${WHITE}${BOLD}// CLEANUP OPERATIONS //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Remove configurations, interfaces, and orphaned artifacts${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}clean${NB}${NC} ${GREEN}${UNDERLINE}[<wg_iface>]${NU}${NC}                       ${ITALIC}${BLUE}> Interactive menu or single interface cleanup${NI}${NC}"
+    echo -e "                                              ${ITALIC} Removes: routes, interface, UCI, state${NI}"
+    echo ""
+    
+    echo -e "   ${RED}${BOLD}${REVERSE}nuke${NR}${NB}${NC}                                     ${ITALIC}${RED}${BOLD}> FORCE REMOVE EVERYTHING (no prompts)${NB}${NI}${NC}"
+    echo -e "                                              ${ITALIC} Removes:${NI}"
+    echo -e "                                                * ${GREEN}${UNDERLINE}All wg_* interfaces${NU}${NC} (UCI + kernel)"
+    echo -e "                                                * ${GREEN}${UNDERLINE}All _vpn_* and wg_* routing tables${NU}${NC}"
+    echo -e "                                                * ${GREEN}${UNDERLINE}All orphaned ip rules${NU}${NC} (by name and ID)"
+    echo -e "                                                * ${GREEN}${UNDERLINE}All NFT chains containing 'wg'${NU}${NC}"
+    echo -e "                                                * ${GREEN}${UNDERLINE}Restores valid backups${NU}${NC}"
+    echo -e "                                                * ${GREEN}${UNDERLINE}Resets state file${NU}${NC}"
+    echo ""
+
+
+
+    # 7.    USER SETTINGS
+    echo ""
+    echo -e " ${WHITE}${BOLD}// USER SETTINGS //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Override built-in defaults permanently${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}settings show${NB}${NC}                           ${ITALIC}${BLUE}> Display current user settings${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}<key> <value>${NU}${NC}              ${ITALIC}${BLUE}> Set default value${NI}${NC}"
+    echo -e "                                             ${ITALIC} Keys: ${GREEN}dns, port, allowed, colours, verbose${NU}${NC}"
+    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}dns${NU}${NC} ${BLUE}\"1.1.1.1, 8.8.8.8\"${NC}"
+    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}port${NU}${NC} ${BLUE}51820${NC}"
+    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}allowed${NU}${NC} ${BLUE}\"0.0.0.0/0, ::/0\"${NC}"
+    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}colours${NU}${NC} ${BLUE}1${NC} (on/off)"
+    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}verbose${NU}${NC} ${BLUE}0${NC} (on/off)"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}settings edit${NB}${NC}                           ${ITALIC}${BLUE}> Edit settings file with \$EDITOR${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}settings reset${NB}${NC}                          ${ITALIC}${BLUE}> Restore built-in defaults${NI}${NC}"
+    echo ""
+
+
+
+    # 8.    DEBUG TOOLS
+    echo ""
+    echo -e " ${WHITE}${BOLD}// DEBUGGING & LOGS //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Detailed logging and system introspection${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}debug on${NB}${NC} | ${YELLOW}${BOLD}off${NB}${NC}                          ${ITALIC}${BLUE}> Enable/disable debug logging${NI}${NC}"
+    echo -e "                                             ${ITALIC} Writes to: ${GREEN}${UNDERLINE}$DEBUG_LOG${NU}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}debug show${NB}${NC}                              ${ITALIC}${BLUE}> Display current debug log${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug live${NB}${NC}                              ${ITALIC}${BLUE}> Tail debug log (requires ${YELLOW}${BOLD}debug on${NB}${ITALIC}${BLUE})${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug clear${NB}${NC}                             ${ITALIC}${BLUE}> Remove all debug logs${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${YELLOW}${BOLD}debug states${NB}${NC}                            ${ITALIC}${BLUE}> Show internal state file${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug tables${NB}${NC}                            ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/iproute2/rt_tables${NU}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug network${NB}${NC}                           ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/network${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug firewall${NB}${NC}                          ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/firewall${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug dhcp${NB}${NC}                              ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/dhcp${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo ""
+
+
+
+
+    # 9 FLAGS
+    echo ""
+    echo -e " ${WHITE}${BOLD}// GLOBAL FLAGS //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Can be used with any command${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${BLUE}${BOLD}--verbose${NB}${NC}, ${BLUE}${BOLD}-v${NB}${NC}                           ${ITALIC}${BLUE}> Show detailed command output${NI}${NC}"
+    echo -e "                                              ${ITALIC} Useful for a visual step-by-step action->response${NI}"
+    echo ""
+    
+    echo -e "   ${BLUE}${BOLD}--help${NB}${NC}, ${BLUE}${BOLD}-h${NB}${NC}, ${BLUE}${BOLD}help${NB}${NC}                        ${ITALIC}${BLUE}> Show this manual${NI}${NC}"
+    echo ""
+
+
+
+    # 10.   USAGE CMDS EXAMPLES
+    echo ""
+    echo -e " ${WHITE}${BOLD}// USAGE EXAMPLES //${NB}${NC}"
+    echo -e "   ${ITALIC}${BLUE}Common usage patterns${NI}${NC}"
+    echo ""
+    
+    echo -e "   ${WHITE}${BOLD}* Basic VPN setup:${NB}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf setup${NB}${NC} ${GREEN}${UNDERLINE}mullvad${NU}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf up${NB}${NC} ${GREEN}${UNDERLINE}wg_mullvad${NU}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf routes set${NB}${NC} ${GREEN}${UNDERLINE}wg_mullvad lan4${NU}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf status${NB}${NC}"
+    echo ""
+    
+    echo -e "   ${WHITE}${BOLD}* Complete teardown:${NB}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf down${NB}${NC} ${GREEN}${UNDERLINE}wg_mullvad${NU}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf remove${NB}${NC} ${GREEN}${UNDERLINE}wg_mullvad${NU}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf backups restore${NB}${NC} ${GREEN}${UNDERLINE}network${NU}${NC}"
+    echo ""
+    
+    echo -e "   ${WHITE}${BOLD}* Emergency cleanup:${NB}${NC}"
+    echo -e "     ${YELLOW}${BOLD}wg-autoconf ${GREEN}--verbose ${RED}nuke${NB}${NC}"
+    echo ""
+
+
+
+
+    ui_lines 80 "${GREEN}Documentation:${NC}  ${BLUE}${UNDERLINE}https://github.com/alexandrglm/openwrt_wg-autoconf${NU}${NC}"
+    echo ""
+
+    exit 1
+}
 
 
 #####################################################################
@@ -3332,7 +3672,7 @@ setup_wireguard() {
     echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up ${GREEN}$iface_name${NC}"
     echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg-autoconf ${GREEN}$iface_name${NC}"
     echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I ${GREEN}$iface_name ${BLUE}openwrt.com${NC}"
-    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE IT:${NC}          ${YELLOW}wg-autoconf routes set ${GREEN}$iface_name <dst iface>${NC}"
+    echo -e "${GREEN}4.${NC} ${BLUE}ROUTE IT:${NC}          ${YELLOW}wg-autoconf routes set ${GREEN}$iface_name <dst>${NC}"
     ui_lines 66
     
     return 0
@@ -7235,6 +7575,12 @@ debug_handler() {
         rules)
             ip rule show
             ;;
+        chains)
+            nft list ruleset | grep chain -A 3
+            ;;
+        nft)
+            nft list ruleset
+            ;;
         backups)
             ls -Rla /etc/config/*.BACKUP_PRE_WIREGUARD | awk -v YB="\033[1;33m" -v GN="\033[0;32m" -v NC="\033[0m" '{print YB " DATE:" NC "\t", $6, $7, $8, YB " - FILE: " NC GN $9 NC}'
             ;;
@@ -8352,6 +8698,9 @@ arg3=$(echo "$cmd_args" | awk '{print $3}')
 
 # 4. COMMAND DISPATCHER
 case "$cmd" in
+    docs)
+        show_minidoc
+        ;;
     list)
         list_configs
         ;;
