@@ -1,17 +1,25 @@
 ### 0.0.1-r7 -> 1.0.0 r1
 
 
-#### NEXT/PENDING
+### Session 13 2026-02-19~21
+
+- [X] - Add WG (multiple) Servers x Multiple Peer Clients support, fully working.
+
+- [X] - Refactorise `fw4`, `nft`, setup/removal behaviour
+- [X] - Fix NFT CHAIN remnants when deactivate_interface when multiple ifaces enabled & routes (CMD_LOG_3...)
+
+- [X] - Fix Multiple WG Clients x Multiple Routing
+
+- [X] - Remove non-mandatory atomic operations, improved performance ((cleanup(), setup_, remove_, activate_ deactivate_))
+
+- [X] - Fix Disable colours setting
 
 
-- [ ] - Add wg servers setup/etc.. support.
-- [ ] - Fix NFT CHAIN remnants when deactivate_interface when multiple ifaces enabled & routes (CMD_LOG_3...)
-
+### NEXT / PENDING
 ####  Devel -> Debug -> Stage -> Finished
-- [ ] - Fix Disable colours setting. 
+
 - [ ] - Proceed with a deeper staging, tests EVERY error case, validation, multiple scenario
-- [ ] - Test multi-routing behaviour with every possible usecase-scenario.
-- [ ] - CPU cycles meassurement for ... ATOMIC OPERS, EACH LOOP (cleanup(), setup_, remove_, activate_ deactivate_).
+- [X] - Test multi-routing behaviour with every possible usecase-scenario
 
 #### MANDOCS
 - [ ] - Create a full docs/tl;dr
