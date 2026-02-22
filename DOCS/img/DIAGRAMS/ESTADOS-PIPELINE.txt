@@ -1,0 +1,37 @@
+@startuml
+title Complete WireGuard Setup Pipeline
+
+participant "User" as USER
+participant "wg-autoconf" as CLI
+participant "UCI" as UCI
+participant "Kernel" as KERNEL
+participant "NFTables" as NFT
+
+== Setup Phase ==
+USER -> CLI: setup myconfig.conf
+CLI -> CLI: parse & validate
+CLI -> UCI: create interface
+UCI --> CLI: commit
+CLI -> CLI: write state
+
+== Activation Phase ==
+USER -> CLI: up wg_myconfig
+CLI -> KERNEL: ip link add
+CLI -> KERNEL: wg set privatekey
+CLI -> KERNEL: ip addr add
+CLI -> KERNEL: ip link set up
+CLI -> CLI: update state
+
+== Routing Phase ==
+USER -> CLI: routes set wg_myconfig port3
+CLI -> KERNEL: create routing table
+CLI -> KERNEL: add ip rules
+CLI -> KERNEL: add routes
+CLI -> UCI: create firewall zones
+UCI --> CLI: commit
+CLI -> NFT: reload firewall
+CLI -> NFT: re-add critical rules
+CLI -> CLI: final state update
+
+note over CLI: IS_RT_TABLES_IN_USE=1
+@enduml

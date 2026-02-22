@@ -1,0 +1,124 @@
+@startuml
+title wg-autoconf - Complete Lifecycle
+
+state "SYSTEM NATIVE" as NATIVE {
+  state "No WireGuard interfaces" as NO_WG
+  state "Standard routing only" as STANDARD_RT
+  state "Clean firewall" as CLEAN_FW
+}
+
+state "SETUP" as SETUP {
+  state "Configuration created in UCI" as UCI_CFG
+  state "Private key stored" as KEY_STORED
+  state "Peers defined" as PEERS_DEF
+  state "Interface: NOT present in kernel" as NO_KERNEL
+}
+
+state "UP" as UP {
+  state "Interface created in kernel" as KERNEL_IF
+  state "WireGuard tunnel active" as TUNNEL_UP
+  state "Can communicate with peers" as PEER_COMMS
+  state "VPN endpoints reachable" as VPN_ENDPOINT
+}
+
+state "ROUTED" as ROUTED {
+  state "Traffic redirected" as TRAFFIC_REDIR
+  state "LAN clients use VPN" as CLIENTS_VPN
+  state "Routing tables created" as RT_TABLES
+  state "Firewall zones active" as FW_ZONES
+}
+
+state "SYSTEM FULLY WORKING" as WORKING {
+  state "All systems operational" as ALL_OPS
+  state "VPN tunnel + routing" as VPN_ROUTING
+  state "LAN segregated" as LAN_SEG
+  state "Internet via VPN" as INTERNET_VPN
+}
+
+state "UNROUTED" as UNROUTED {
+  state "Routing tables removed" as RT_REMOVED
+  state "Firewall zones cleared" as FW_CLEARED
+  state "Back to plain VPN" as PLAIN_VPN
+  state "LAN clients use direct internet" as LAN_DIRECT
+}
+
+state "DOWN" as DOWN {
+  state "Interface removed from kernel" as IF_REMOVED
+  state "Tunnel terminated" as TUNNEL_DOWN
+  state "No VPN connectivity" as NO_VPN
+  state "UCI config persists" as UCI_PERSIST
+}
+
+state "REMOVE" as REMOVE {
+  state "UCI configuration deleted" as UCI_DEL
+  state "Private key purged" as KEY_PURGED
+  state "Peer definitions removed" as PEERS_REMOVED
+  state "Complete cleanup" as FULL_CLEAN
+}
+
+NATIVE --> SETUP : Step 1 - Configure
+note on link
+  Create WireGuard configuration
+  Define peers and keys
+  No active tunnel yet
+end note
+
+SETUP --> UP : Step 2 - Activate
+note on link
+  Bring tunnel up
+  Establish connection with peers
+  Interface becomes operational
+end note
+
+UP --> ROUTED : Step 3 - Add routing
+note on link
+  Redirect LAN traffic
+  Create routing policies
+  Configure firewall zones
+end note
+
+ROUTED --> WORKING : Step 4 - Fully operational
+note on link
+  System reaches steady state
+  All components working together
+  VPN + routing functional
+end note
+
+WORKING --> UNROUTED : Step 5 - Remove routing
+note on link
+  Keep VPN active
+  Stop routing LAN traffic
+  Restore normal LAN access
+end note
+
+UNROUTED --> DOWN : Step 6 - Deactivate
+note on link
+  Bring tunnel down
+  Remove kernel interface
+  VPN connectivity stops
+end note
+
+DOWN --> REMOVE : Step 7 - Purge
+note on link
+  Delete UCI configuration
+  Remove all traces
+  Clean up completely
+end note
+
+REMOVE --> NATIVE : Step 8 - Back to clean state
+note on link
+  System restored
+  No WireGuard artifacts
+  Ready for new setup
+end note
+
+note right of NATIVE : System with no\nWireGuard configuration
+note right of SETUP : Configured but\ninactive
+note right of UP : VPN tunnel active\nbut LAN unchanged
+note right of ROUTED : VPN + routing\nconfigured
+note right of WORKING : Production state\nfully operational
+note right of UNROUTED : VPN only\nno LAN routing
+note right of DOWN : Inactive but\nconfiguration exists
+note right of REMOVE : Complete cleanup\nall traces gone
+
+@enduml

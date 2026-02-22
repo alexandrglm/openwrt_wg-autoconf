@@ -1,0 +1,65 @@
+@startuml
+title WireGuard Configuration Data Model
+
+!define TABLE(x) class x << (T,#FFAAAA) >>
+!define RECORD(x) class x << (R,#AAFFAA) >>
+!define STATE(x) class x << (S,#AAAAFF) >>
+
+package "UCI Configuration" {
+  TABLE(network) {
+    + interface.wg_*
+    + proto = wireguard
+    + private_key
+    + addresses
+    + listen_port
+  }
+
+  TABLE(network_wireguard) {
+    + peer entries
+    + public_key
+    + allowed_ips
+    + endpoint_host
+    + endpoint_port
+  }
+
+  TABLE(firewall) {
+    + zone.wg_*
+    + rule.Allow-WireGuard-*
+    + forwarding.wg_*_to_wan
+  }
+}
+
+package "Runtime State" {
+  STATE(state_file) {
+    + ID_X_NAME
+    + IS_ACTIVE
+    + IS_RT_TABLES_IN_USE
+    + CURRENT_PEERS
+    + METADATA
+  }
+}
+
+package "Routing Tables" {
+  RECORD(routing_table) {
+    + table_id
+    + table_name: _vpn_wg_*_port*
+    + ip_rules: priority = id × 10
+    + routes: subnet -> device
+  }
+}
+
+package "NFTables" {
+  RECORD(nft_rules) {
+    + forward chain
+    + input chain
+    + output chain
+    + custom rules
+  }
+}
+
+network -down-> network_wireguard : contains peers
+network -down-> firewall : references zone
+state_file -up-> network : references
+routing_table -up-> network : uses
+nft_rules -up-> firewall : implements
+@enduml

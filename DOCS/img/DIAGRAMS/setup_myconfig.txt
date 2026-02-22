@@ -1,0 +1,23 @@
+@startuml
+title wg-autoconf setup myconfig
+
+start
+:Parse /etc/wireguard/myconfig.conf;
+:Validate all fields\n(keys, IPs, endpoints);
+:Check for address collisions;
+
+if (Validation OK?) then (yes)
+  :Create interface in UCI\n(/etc/config/network);
+  :Write state: ID_X_NAME=myconfig;
+  :Commit UCI;
+  note right
+    Interface "wg_myconfig"
+    created but DOWN
+  end note
+else (no)
+  :Return error;
+  stop
+endif
+
+stop
+@enduml

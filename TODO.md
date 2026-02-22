@@ -1,5 +1,15 @@
 ### 0.0.1-r7 -> 1.0.0 r1
 
+### PENDING
+- [ ] -> Create Wiki. Create Wiki self-hosted/portfolio
+- [ ] - Re-implement [`websocket-shell-react`](https://github.com/alexandrglm/websocket-shell-react) to provide a 'live test demo`**
+
+### Session 14 2020-02-22
+
+- [X] - Proceed with a deeper staging, tests EVERY error case, validation, multiple scenario
+- [X] - Test multi-routing behaviour with every possible usecase-scenario
+- [X] - Create a full docs/tl;dr
+    
 
 ### Session 13 2026-02-19~21
 
@@ -14,16 +24,6 @@
 
 - [X] - Fix Disable colours setting
 
-
-### NEXT / PENDING
-####  Devel -> Debug -> Stage -> Finished
-
-- [ ] - Proceed with a deeper staging, tests EVERY error case, validation, multiple scenario
-- [X] - Test multi-routing behaviour with every possible usecase-scenario
-
-#### MANDOCS
-- [ ] - Create a full docs/tl;dr
-- [ ] - **Strongly consider re-implementing `websocket-shell-react` to provide a 'live test demo` for a plausible self-hosted wiki page**
 ---
 
 ### Session 12 2026-02-16
@@ -53,12 +53,12 @@
      +  `del_routing_table()`
      +  `add_ip_rule()`
      +  `del_ip_rules_by_table()`
-     -  [ ] - **PENDING: UPDATE DOCUMENTATION**
+     -  [X] - **PENDING: UPDATE DOCUMENTATION**
      
 ##### State Machine & System
 - [X] - Complete refactor of state management system (`state_safety()`, atomic operations, improved)
 - [X] - Added system capabilities detection (`check_bins()` for ip-tiny, ip-full, nftables, iptables, wireguard-tools)
-    -  [ ] - **PENDING: Use them; expand switch/bypass cases; create new states catergories from checked bin availability**
+    -  [X] - **PENDING: Use them; expand switch/bypass cases; create new states catergories from checked bin availability**
 
     
 ##### Setup/Remove, Up/Down

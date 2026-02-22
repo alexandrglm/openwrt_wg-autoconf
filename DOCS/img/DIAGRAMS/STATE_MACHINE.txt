@@ -1,0 +1,103 @@
+@startuml
+title wg-autoconf - State Machine
+
+participant "Not Configured" as NOTCONF
+participant "Configured (Down)" as DOWN
+participant "Active (Up)" as UP
+participant "Routed" as ROUTED
+
+== Initial State ==
+-> CONFIGURED: System Native\n(no WireGuard)
+
+== Setup Transition ==
+NOTCONF -> DOWN: wg-autoconf setup myconfig.conf
+note over NOTCONF, DOWN
+  • Parse config file
+  • Validate keys and IPs
+  • Create UCI interface
+  • Write state: ID_X_NAME=myconfig
+  • Result: Interface exists but DOWN
+end note
+
+== Activation Transition ==
+DOWN -> UP: wg-autoconf up wg_myconfig
+note over DOWN, UP
+  • Read private key from state
+  • ip link add type wireguard
+  • wg set private-key
+  • ip addr add 10.15.0.1/24
+  • ip link set up
+  • Write state: IS_ACTIVE=1
+  • Result: Interface UP, peers visible
+end note
+
+== Routing Transition ==
+UP -> ROUTED: wg-autoconf routes set wg_myconfig port3
+note over UP, ROUTED
+  • Create routing table: _vpn_wg_myconfig_port3
+  • Add IP rules (priority = table_id × 10)
+  • Add routes: subnet -> port3, default -> wg
+  • Create firewall zone & forwarding
+  • Reload firewall (nftables rebuild)
+  • Re-add critical nftables rules
+  • Write state: IS_RT_TABLES_IN_USE=1
+  • Result: LAN traffic routed through VPN
+end note
+
+== Clear Routing Transition ==
+ROUTED -> UP: wg-autoconf routes unsed wg_myconfig
+note over ROUTED, UP
+  • Remove IP rules
+  • Delete routing tables
+  • Remove firewall zone
+  • Reload firewall
+  • Write state: IS_RT_TABLES_IN_USE=0
+  • Result: Back to plain VPN (no routing)
+end note
+
+== Deactivation Transition ==
+UP -> DOWN: wg-autoconf down wg_myconfig
+note over UP, DOWN
+  • ip link set down
+  • ip link delete wg_myconfig
+  • Write state: IS_ACTIVE=0
+  • Result: Interface removed from kernel
+  • UCI config remains
+end note
+
+== Nuke Transition ==
+DOWN -> NOTCONF: wg-autoconf nuke wg_myconfig
+note over DOWN, NOTCONF
+  • uci delete network.wg_myconfig
+  • uci delete network.wg_myconfig_yeye
+  • uci delete firewall.zone_wg_myconfig
+  • uci delete firewall.allow_wg_myconfig
+  • uci delete firewall.fwd_wg_myconfig_to_wan
+  • uci commit
+  • Result: Complete cleanup
+end note
+
+== Auto Transitions ==
+UP -> UP: Peer handshake (every 2 mins)
+note over UP
+  • Periodic key exchange
+  • Keeps tunnel alive
+  • Updates transfer counters
+end note
+
+ROUTED -> ROUTED: Firewall reload
+note over ROUTED
+  • External trigger (other services)
+  • Reapplies nftables rules
+  • Critical workaround for rules persistence
+end note
+
+DOWN -> DOWN: System boot
+note over DOWN
+  • /etc/init.d/network restart
+  • UCI config reloaded
+  • Interface remains DOWN
+  • Ready for 'up' command
+end note
+
+@enduml

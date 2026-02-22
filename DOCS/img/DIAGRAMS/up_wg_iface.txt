@@ -1,0 +1,18 @@
+@startuml
+title wg-autoconf up wg_myconfig
+
+start
+:Read state to get private key;
+:Create WireGuard interface\nwith `ip link add type wireguard`;
+:Set private key with `wg set`;
+:Assign IP address and bring UP;
+:Wait for interface operational;
+:Write state: IS_ACTIVE=1;
+
+note right
+  Result: Interface "wg_myconfig"
+  is UP, can ping peer
+end note
+
+stop
+@enduml

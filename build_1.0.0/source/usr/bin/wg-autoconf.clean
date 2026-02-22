@@ -1014,54 +1014,55 @@ show_usage() {
     echo ""
     ui_lines 80 "${GREEN}WireGuard Auto-Config${NC} - ${RED}$VERSION${NC} HELP"
     echo ""
-    echo -e "${GREEN}Configuration Management:${NC}"
-    echo -e " ${YELLOW}list${NC}                             - List Available .conf files at /etc/wireguard"
-    echo -e " ${YELLOW}list${NC} ${GREEN}<config file>${NC}               - Show configuration"
-    echo -e " ${YELLOW}test${NC} ${GREEN}<config file>${NC}               - Test a .conf file"
+    echo -e "${GREEN}${BOLD}${UNDERLINE}Configuration Management:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}list${NC}                             ${ITALIC}- List Available .conf files at /etc/wireguard${NI}"
+    echo -e " ${YELLOW}list${NC} ${GREEN}<config file>${NC}               ${ITALIC}- Show configuration${NI}"
+    echo -e " ${YELLOW}test${NC} ${GREEN}<config file>${NC}               ${ITALIC}- Test a .conf file${NI}"
     echo ""
-    echo -e " ${YELLOW}setup${NC} ${GREEN}<config file>${NC}              - Setup from .conf (creates wg_<CONF_NAME>)"
-    echo -e " ${YELLOW}manual${NC}                           - Create new advanced configuration from scratch"
-    echo -e " ${YELLOW}manual${NC} ${GREEN}<config file>${NC}             - Advanced mode using existing .conf as base"
+    echo -e " ${YELLOW}setup${NC} ${GREEN}<config file>${NC}              ${ITALIC}- Setup from .conf (creates wg_<CONF_NAME>)${NI}"
+    echo -e " ${YELLOW}manual${NC}                           ${ITALIC}- Create new advanced configuration from scratch${NI}"
+    echo -e " ${YELLOW}manual${NC} ${GREEN}<config file>${NC}             ${ITALIC}- Advanced mode using existing .conf as base${NI}"
     echo ""
-    echo -e "${BLUE}Interface Control:${NC}"
-    echo -e " ${YELLOW}status${NC}                           - Show all WG interfaces"
-    echo -e " ${YELLOW}status${NC} ${GREEN}<wg iface>${NC}                - Show specific WG interface"
-    echo -e " ${YELLOW}up${NC} ${GREEN}<wg iface>${NC}                    - Enable WG interface"
-    echo -e " ${YELLOW}down${NC} ${GREEN}<wg iface>${NC}                  - Disable WG interface"
-    echo -e " ${YELLOW}remove${NC} ${GREEN}<wg iface>${NC}                - Delete WG interface (unsetup)"
+    echo -e "${BLUE}${BOLD}${UNDERLINE}Interface Control:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}status${NC}                           ${ITALIC}- Show all WG interfaces"
+    echo -e " ${YELLOW}status${NC} ${GREEN}<wg iface>${NC}                ${ITALIC}- Show specific WG interface${NI}"
+    echo -e " ${YELLOW}up${NC} ${GREEN}<wg iface>${NC}                    ${ITALIC}- Enable WG interface${NI}"
+    echo -e " ${YELLOW}down${NC} ${GREEN}<wg iface>${NC}                  ${ITALIC}- Disable WG interface${NI}"
+    echo -e " ${YELLOW}remove${NC} ${GREEN}<wg iface>${NC}                ${ITALIC}- Delete WG interface (unsetup)${NI}"
     echo ""
-    echo -e "${YELLOW}Routing & Traffic Control:${NC}"
-    echo -e " ${YELLOW}routes show${NC}                      - Show all routes"
-    echo -e " ${YELLOW}routes show${NC} ${GREEN}<wg iface>${NC}           - Show routes for WG interface"
-    echo -e " ${YELLOW}routes set${NC} ${GREEN}<wg iface> <iface>${NC}    - Set routes: LAN -> WG"
-    echo -e " ${YELLOW}routes unset${NC} ${GREEN}<wg iface> <iface>${NC}  - Unset routes: LAN -> WG"
+    echo -e "${YELLOW}${BOLD}${UNDERLINE}Routing & Traffic Control:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}routes show${NC}                      ${ITALIC}- Show all routes"
+    echo -e " ${YELLOW}routes show${NC} ${GREEN}<wg iface>${NC}           ${ITALIC}- Show routes for WG interface${NI}"
+    echo -e " ${YELLOW}routes set${NC} ${GREEN}<wg iface> <iface>${NC}    ${ITALIC}- Set routes: LAN <-> WG${NI}"
+    echo -e " ${YELLOW}routes unset${NC} ${GREEN}<wg iface> <iface>${NC}  ${ITALIC}- Unset routes: LAN <-> WG${NI}"
     echo ""
-    echo -e "${MAGENTA}WireGuard Servers${NC}"
-    echo -e " ${YELLOW}server list${NC}                      - Show all Created/Active Servers"
-    echo -e " ${YELLOW}server create ${GREEN}<wg server name>${NC}           - Create a new WG server"
-    echo -e " ${YELLOW}server add ${GREEN}<wg server> <new client name>${NC} - Add Client Peer/Key/IP config"
-    echo -e " ${YELLOW}server revoke ${GREEN}<wg server> <client name>${NC} - Revoke a Client for a WG Server"
-    echo -e " ${YELLOW}server remove ${GREEN}<wg server>${NC}           -  Remove and clean a WG server"
-    echo -e " ${YELLOW}server stats ${GREEN}<wg server>${NC}           -  Show server statistics"
-    echo -e "\033[0;35mBackup/Recovery & Upgrade:\033[0m"
-    echo -e " ${YELLOW}backups show${NC}                     - List available backups"
-    echo -e " ${YELLOW}backups restore${NC} ${GREEN}<file>${NC}           - Restore backup files"
+    echo -e "${CYAN}${BOLD}${UNDERLINE}WireGuard Servers${NU}${NB}${NC}"
+    echo -e " ${YELLOW}server list${NC}                      ${ITALIC}- Show all Created/Active Servers"
+    echo -e " ${YELLOW}server create ${GREEN}<server>${NC}           ${ITALIC}- Create a new WG server${NI}"
+    echo -e " ${YELLOW}server add ${GREEN}<server> <client>${NC}     ${ITALIC}- Add Client Peer/Key/IP config${NI}"
+    echo -e " ${YELLOW}server revoke ${GREEN}<server> <client>${NC}  ${ITALIC}- Revoke a Client for a WG Server${NI}"
+    echo -e " ${YELLOW}server remove ${GREEN}<server>${NC}           ${ITALIC}- Remove and clean a WG server${NI}"
+    echo -e " ${YELLOW}server stats ${GREEN}<server>${NC}            ${ITALIC}- Show server statistics${NI}"
     echo ""
-    echo -e " ${YELLOW}upgrade${NC}                          - Upgrade wg-autoconf safely"
+    echo -e "${MAGENTA}${BOLD}${UNDERLINE}Backup/Recovery & Upgrade:\033[0m${NU}${NB}${NC}"
+    echo -e " ${YELLOW}backups show${NC}                     ${ITALIC}- List available backups${NI}"
+    echo -e " ${YELLOW}backups restore${NC} ${GREEN}<file>${NC}           ${ITALIC}- Restore backup files${NI}"
     echo ""
-    echo -e "${RED}Cleanup Operations:${NC}"
-    echo -e " ${YELLOW}clean${NC}                            - Clean WG configs (interactive)"
-    echo -e " ${YELLOW}clean${NC} ${GREEN}<wg iface>${NC}                 - Clean specific interface"
-    echo -e " ${RED}nuke${NC}                             - ${RED}Force removal & cleanup ALL WG configs (no prompts)${NC}"
+    echo -e " ${YELLOW}upgrade${NC}                          ${ITALIC}- Upgrade wg-autoconf safely${NI}"
     echo ""
-    echo -e "${GREEN}Verbosity Mode:${NC}"
-    echo -e " ${YELLOW}--verbose / -v${NC}                   - Verbose mode for any command"
+    echo -e "${RED}${BOLD}${UNDERLINE}Cleanup Operations:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}clean${NC}                            ${ITALIC}- Clean WG configs, Interactive mode${NI}"
+    echo -e " ${YELLOW}clean${NC} ${GREEN}<wg iface>${NC}                 ${ITALIC}- Clean specific interface${NI}"
+    echo -e " ${RED}nuke${NC}                             - ${BOLD}${BLINK}${RED}Force removal & cleanup ALL WG configs (no prompts)${NC}${NK}${NB}"
     echo ""
-    echo -e "${GREEN}Debug Mode:${NC}"
-    echo -e " ${YELLOW}debug on / off${NC}                   - Enable/Disable Debug logging functions"
-    echo -e " ${YELLOW}debug clear${NC}                      - Clear latest/backuped logs"
-    echo -e " ${YELLOW}debug show${NC}                       - Show latest debug log"
-    echo -e " ${YELLOW}debug live${NC}                       - Tail debug log live"
+    echo -e "${GREEN}${BOLD}${UNDERLINE}Verbosity Mode:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}--verbose / -v${NC}                   ${ITALIC}- Verbose mode for any command${NI}"
+    echo ""
+    echo -e "${GREEN}${BOLD}${UNDERLINE}Debug Mode:${NU}${NB}${NC}"
+    echo -e " ${YELLOW}debug on / off${NC}                   ${ITALIC}- Enable/Disable Debug logging functions${NI}"
+    echo -e " ${YELLOW}debug clear${NC}                      ${ITALIC}- Clear latest/backuped log${NI}"
+    echo -e " ${YELLOW}debug show${NC}                       ${ITALIC}- Show latest debug log${NI}"
+    echo -e " ${YELLOW}debug live${NC}                       ${ITALIC}- Tail debug log live${NI}"
     echo ""
     ui_lines 80 "${BLUE}Usage:${NC} wg-autoconf ${YELLOW}COMMAND${NC} ${GREEN}<args>${NC}"
     exit 1
@@ -1132,40 +1133,39 @@ show_minidoc() {
     echo ""
     echo -e " ${WHITE}${BOLD}// QUICK START //${NB}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server create${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}             ${ITALIC}${BLUE}> Create new WireGuard server${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}server add${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}     ${ITALIC}${BLUE}> Add client peer to server${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}server revoke${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}  ${ITALIC}${BLUE}> Revoke client access${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}server stats${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}            ${ITALIC}${BLUE}> Show server status${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server create${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}                ${ITALIC}${BLUE}> Create new WireGuard server${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server add${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}          ${ITALIC}${BLUE}> Add client peer to server${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server revoke${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}       ${ITALIC}${BLUE}> Revoke client access${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server stats${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}                 ${ITALIC}${BLUE}> Show server status${NI}${NC}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// 2.1 SERVER MANAGEMENT //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Create and manage WireGuard server instances${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server list${NB}${NC}                               ${ITALIC}${BLUE}> List all created/active servers${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}server create${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}         ${ITALIC}${BLUE}> Generate keys, interface and base config${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server list${NB}${NC}                              ${ITALIC}${BLUE}> List all created/active servers${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server create${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}                ${ITALIC}${BLUE}> Generate keys, interface and base config${NI}${NC}"
     echo -e "                                               ${ITALIC}Creates: wg_<server> interface + firewall zone${NI}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server remove${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}         ${ITALIC}${BLUE}> Remove server and clean configuration${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server remove${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}                ${ITALIC}${BLUE}> Remove server and clean configuration${NI}${NC}"
     echo -e "                                               ${ITALIC}Deletes interface, peers, firewall and DHCP${NI}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// 2.2 CLIENT MANAGEMENT //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Manage client peers attached to a WireGuard server${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server add${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}   ${ITALIC}${BLUE}> Create client peer + keypair${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server add${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}          ${ITALIC}${BLUE}> Create client peer + keypair${NI}${NC}"
     echo -e "                                               ${ITALIC}Assigns IP and generates client config${NI}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server revoke${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC} ${ITALIC}${BLUE}> Disable and remove client peer${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server revoke${NB}${NC} ${GREEN}${UNDERLINE}<wg_server> <client>${NU}${NC}       ${ITALIC}${BLUE}> Disable and remove client peer${NI}${NC}"
     echo -e "                                               ${ITALIC}Removes peer and updates running interface${NI}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// 2.3 SERVER STATUS & MONITORING //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Inspect runtime state and traffic statistics${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}server stats${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}          ${ITALIC}${BLUE}> Show peers, handshake and traffic${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}server stats${NB}${NC} ${GREEN}${UNDERLINE}<wg_server>${NU}${NC}                 ${ITALIC}${BLUE}> Show peers, handshake and traffic${NI}${NC}"
     echo -e "                                               ${ITALIC}Displays RX/TX, last handshake, endpoint${NI}"
     echo ""
-    ui_lines 
     echo ""
     echo -e " ${WHITE}${BOLD}// 3. STATUS & MONITORING //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Check interface state, handshake, traffic${NI}${NC}"
@@ -1175,7 +1175,7 @@ show_minidoc() {
     echo -e "                                              ${ITALIC} transfer, routes, backup validity${NI}"
     echo ""
     echo ""
-    echo -e " ${WHITE}${BOLD}// 4. BACKUP & RECOVERY$ //{NB}${NC}"
+    echo -e " ${WHITE}${BOLD}// 4. BACKUP & RECOVERY$ //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Automatic backups of network/dhcp/firewall before changes${NI}${NC}"
     echo ""
     echo -e "   ${YELLOW}${BOLD}backups show${NB}${NC}                             ${ITALIC}${BLUE}> List all backups with validation status${NI}${NC}"
@@ -1207,44 +1207,44 @@ show_minidoc() {
     echo -e " ${WHITE}${BOLD}// 6. USER SETTINGS //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Override built-in defaults permanently${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}settings show${NB}${NC}                           ${ITALIC}${BLUE}> Display current user settings${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}settings show${NB}${NC}                            ${ITALIC}${BLUE}> Display current user settings${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}<key> <value>${NU}${NC}              ${ITALIC}${BLUE}> Set default value${NI}${NC}"
-    echo -e "                                             ${ITALIC} Keys: ${GREEN}dns, port, allowed, colours, verbose${NU}${NC}"
-    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}dns${NU}${NC} ${BLUE}\"1.1.1.1, 8.8.8.8\"${NC}"
-    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}port${NU}${NC} ${BLUE}51820${NC}"
-    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}allowed${NU}${NC} ${BLUE}\"0.0.0.0/0, ::/0\"${NC}"
-    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}colours${NU}${NC} ${BLUE}1${NC} (on/off)"
-    echo -e "                                               * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}verbose${NU}${NC} ${BLUE}0${NC} (on/off)"
+    echo -e "   ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}<key> <value>${NU}${NC}               ${ITALIC}${BLUE}> Set default value${NI}${NC}"
+    echo -e "                                              ${ITALIC} Keys: ${GREEN}dns, port, allowed, colours, verbose${NU}${NC}"
+    echo -e "                                                * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}dns${NU}${NC} ${BLUE}\"1.1.1.1, 8.8.8.8\"${NC}"
+    echo -e "                                                * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}port${NU}${NC} ${BLUE}51820${NC}"
+    echo -e "                                                * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}allowed${NU}${NC} ${BLUE}\"0.0.0.0/0, ::/0\"${NC}"
+    echo -e "                                                * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}colours${NU}${NC} ${BLUE}1${NC} (on/off)"
+    echo -e "                                                * ${YELLOW}${BOLD}settings set${NB}${NC} ${GREEN}${UNDERLINE}verbose${NU}${NC} ${BLUE}0${NC} (on/off)"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}settings edit${NB}${NC}                           ${ITALIC}${BLUE}> Edit settings file with \$EDITOR${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}settings reset${NB}${NC}                          ${ITALIC}${BLUE}> Restore built-in defaults${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}settings edit${NB}${NC}                            ${ITALIC}${BLUE}> Edit settings file with \$EDITOR${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}settings reset${NB}${NC}                           ${ITALIC}${BLUE}> Restore built-in defaults${NI}${NC}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// 7. DEBUGGING & LOGS //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Detailed logging and system introspection${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}debug on${NB}${NC} | ${YELLOW}${BOLD}off${NB}${NC}                          ${ITALIC}${BLUE}> Enable/disable debug logging${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug on${NB}${NC} | ${YELLOW}${BOLD}off${NB}${NC}                           ${ITALIC}${BLUE}> Enable/disable debug logging${NI}${NC}"
     echo -e "                                             ${ITALIC} Writes to: ${GREEN}${UNDERLINE}$DEBUG_LOG${NU}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}debug show${NB}${NC}                              ${ITALIC}${BLUE}> Display current debug log${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug live${NB}${NC}                              ${ITALIC}${BLUE}> Tail debug log (requires ${YELLOW}${BOLD}debug on${NB}${ITALIC}${BLUE})${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug clear${NB}${NC}                             ${ITALIC}${BLUE}> Remove all debug logs${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug show${NB}${NC}                               ${ITALIC}${BLUE}> Display current debug log${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug live${NB}${NC}                               ${ITALIC}${BLUE}> Tail debug log (requires ${YELLOW}${BOLD}debug on${NB}${ITALIC}${BLUE})${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug clear${NB}${NC}                              ${ITALIC}${BLUE}> Remove all debug logs${NI}${NC}"
     echo ""
-    echo -e "   ${YELLOW}${BOLD}debug states${NB}${NC}                            ${ITALIC}${BLUE}> Show internal state file${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug tables${NB}${NC}                            ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/iproute2/rt_tables${NU}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug network${NB}${NC}                           ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/network${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug firewall${NB}${NC}                          ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/firewall${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
-    echo -e "   ${YELLOW}${BOLD}debug dhcp${NB}${NC}                              ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/dhcp${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug states${NB}${NC}                             ${ITALIC}${BLUE}> Show internal state file${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug tables${NB}${NC}                             ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/iproute2/rt_tables${NU}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug network${NB}${NC}                            ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/network${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug firewall${NB}${NC}                           ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/firewall${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
+    echo -e "   ${YELLOW}${BOLD}debug dhcp${NB}${NC}                               ${ITALIC}${BLUE}> Show ${GREEN}${UNDERLINE}/etc/config/dhcp${NU}${ITALIC}${BLUE} (WG sections only)${NI}${NC}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// 8. GLOBAL FLAGS //${NB}${NC}"
     echo -e "   ${ITALIC}${BLUE}Can be used with any command${NI}${NC}"
     echo ""
-    echo -e "   ${BLUE}${BOLD}--verbose${NB}${NC}, ${BLUE}${BOLD}-v${NB}${NC}                           ${ITALIC}${BLUE}> Show detailed command output${NI}${NC}"
+    echo -e "   ${BLUE}${BOLD}--verbose${NB}${NC}, ${BLUE}${BOLD}-v${NB}${NC}                            ${ITALIC}${BLUE}> Show detailed command output${NI}${NC}"
     echo -e "                                              ${ITALIC} Useful for a visual step-by-step action->response${NI}"
     echo ""
-    echo -e "   ${BLUE}${BOLD}--help${NB}${NC}, ${BLUE}${BOLD}-h${NB}${NC}, ${BLUE}${BOLD}help${NB}${NC}                        ${ITALIC}${BLUE}> Show this manual${NI}${NC}"
+    echo -e "   ${BLUE}${BOLD}--help${NB}${NC}, ${BLUE}${BOLD}-h${NB}${NC}, ${BLUE}${BOLD}help${NB}${NC}                         ${ITALIC}${BLUE}> Show this manual${NI}${NC}"
     echo ""
     echo ""
     echo -e " ${WHITE}${BOLD}// USAGE EXAMPLES //${NB}${NC}"
@@ -1273,7 +1273,7 @@ show_minidoc() {
     echo -e "   ${WHITE}${BOLD}* Emergency cleanup:${NB}${NC}"
     echo -e "     ${YELLOW}${BOLD}wg-autoconf ${GREEN}--verbose ${RED}nuke${NB}${NC}"
     echo ""
-    ui_lines 80 "${GREEN}Documentation:${NC}  ${BLUE}${UNDERLINE}https://github.com/alexandrglm/openwrt_wg-autoconf${NU}${NC}"
+    ui_lines 80 "${GREEN}${BOLD}${BLINK}DOCS/ISSUES${NB}${NK}:${NC}  ${BLUE}${UNDERLINE}https://github.com/alexandrglm/openwrt_wg-autoconf${NU}${NC}"
     echo ""
     exit 1
 }
@@ -1932,14 +1932,14 @@ setup_wireguard() {
         echo ""
         ui_lines 79 "${YELLOW}7. SAVE WIREGUARD CONFIGURATION FILE${NC}"
         echo ""
-        ui_lines 50 "CONFIG SUMMARY"
-        echo -e "Interface:           $iface_name"
-        echo -e "Private Key:         $(echo $private_key | cut -c1-10)..."
-        echo -e "Public Key:          $(echo $public_key | cut -c1-10)..."
-        echo -e "Local IP:            $address"
-        echo -e "Endpoint:            $endpoint_host:$endpoint_port"
-        echo -e "Allowed IPs:         $allowed_ips"
-        echo -e "DNS:                 $dns"
+        ui_lines 49 "${MAGENTA}${BOLD}CONFIG SUMMARY${NB}${NC}"
+        echo -e " Interface:           $iface_name"
+        echo -e " Private Key:         $(echo $private_key | cut -c1-10)..."
+        echo -e " Public Key:          $(echo $public_key | cut -c1-10)..."
+        echo -e " Local IP:            $address"
+        echo -e " Endpoint:            $endpoint_host:$endpoint_port"
+        echo -e " Allowed IPs:         $allowed_ips"
+        echo -e " DNS:                 $dns"
         ui_lines 50
         echo ""
         printf "${YELLOW}Save config as .conf file in $WG_CONF_DIR? (${GREEN}y${YELLOW}/${RED}N${YELLOW}):${NC} "
@@ -2008,7 +2008,7 @@ setup_wireguard() {
     verbose echo ""
     verbose success "D0ne!"
     echo ""
-    ui_lines 65 "${GREEN}WireGuard CONFIG${NC}"
+    ui_lines 65 "${GREEN}Your WireGuard Setup${NC}"
     echo -e "- ${BLUE}Interface:${NC}          ${YELLOW}$iface_name${NC}"
     echo -e "- ${BLUE}Local IP:${NC}           ${YELLOW}$address${NC}"
     echo -e "- ${BLUE}Endpoint:${NC}           ${YELLOW}${endpoint_host:-N/A}:${endpoint_port:-N/A}${NC}"
@@ -2016,7 +2016,7 @@ setup_wireguard() {
     ui_lines 65 "${GREEN}FINISH SETUP${NC}"
     echo -e "${GREEN}1.${NC} ${BLUE}ENABLE WG:${NC}         ${YELLOW}wg-autoconf up ${GREEN}$iface_name${NC}"
     echo -e "${GREEN}2.${NC} ${BLUE}VERIFY:${NC}            ${YELLOW}wg-autoconf ${GREEN}$iface_name${NC}"
-    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}ping -I ${GREEN}$iface_name ${BLUE}openwrt.com${NC}"
+    echo -e "${GREEN}3.${NC} ${BLUE}TEST WG:${NC}           ${YELLOW}traceroute -i ${GREEN}$iface_name ${BLUE}openwrt.com${NC}"
     echo -e "${GREEN}4.${NC} ${BLUE}ROUTE IT:${NC}          ${YELLOW}wg-autoconf routes set ${GREEN}$iface_name <dst>${NC}"
     ui_lines 66
     return 0
@@ -2934,8 +2934,8 @@ fw_reload_with_wg_detection() {
     debug_write "[FIREWALL] Reloading with WG detection"
     /etc/init.d/firewall reload 2>/dev/null
     sleep 2
-    local all_wg_interfaces=$(grep "^[0-9]\+ wg_" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
-    all_wg_interfaces="$all_wg_interfaces $(ip link show | grep '^[0-9]*:.*wg_' | awk '{print $2}' | sed 's/:$//')"
+    local all_wg_interfaces=$(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
+    all_wg_interfaces="$all_wg_interfaces $(ip link show | grep '^[0-9]*:.*wg' | awk '{print $2}' | sed 's/:$//')"
     for wg_iface in $all_wg_interfaces; do
         if nft add rule inet fw4 "accept_from_$wg_iface" counter accept 2>/dev/null; then
             debug_write "[FIREWALL] Re-added accept_from_$wg_iface"
@@ -3511,7 +3511,7 @@ cleanup() {
     debug_write "[CLEANUP] WG tables: $wg_tables"
     debug_write "[CLEANUP] VPN tables: $vpn_tables"
     if [ "$CAP_NFTABLES" = "1" ]; then
-        all_nft_chains=$(nft list table inet fw4 2>/dev/null | grep -o 'chain [a-zA-Z0-9_]*_wg_[a-zA-Z0-9_]*' | sed 's/chain //' | sort -u)
+        all_nft_chains=$(nft list table inet fw4 2>/dev/null | grep -o 'chain [a-zA-Z0-9_]*_wg[a-zA-Z0-9_]*' | sed 's/chain //' | sort -u)
         debug_write "[CLEANUP] NFT WG chains: $all_nft_chains"
     fi
     case "$mode" in
@@ -3711,8 +3711,8 @@ cleanup() {
                 ip route flush table "$tid" 2>/dev/null
                 debug_write "[NUKE] Flushed orphaned table $tid"
             fi
-            debug_write "[NUKE] Cleaning up any remaining wg_* entries in rt_tables"
-            local remaining_wg_tables=$(grep -E '^[0-9]+[[:space:]]+wg_' /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
+            debug_write "[NUKE] Cleaning up any remaining wg* entries in rt_tables"
+            local remaining_wg_tables=$(grep -E '^[0-9]+[[:space:]]+wg' /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
             for table in $remaining_wg_tables; do
                 debug_write "[NUKE] Force removing orphaned wg table: $table"
                 del_routing_table "$table"
@@ -3827,7 +3827,7 @@ set_lan_routes() {
     check_bins
     local wg_id=$(state_get_id "$wg_iface" 2>/dev/null)
     local wg_id_found=$?
-    log "Setting up routes for $lan_iface through $wg_iface..."
+    log "Setting up routes for ${GREEN}$lan_iface${NC} via ${GREEN}${BLINK}$wg_iface${NK}${NB} ..."
     echo ""
     local lan_ip=""
     local lan_netmask=""
@@ -3932,20 +3932,20 @@ set_lan_routes() {
         fi
     done
     verbose log "Adding fresh forwarding rules..."
-    uci add firewall forwarding
-    uci set firewall.@forwarding[-1].src="$lan_iface"
-    uci set firewall.@forwarding[-1].dest="$wg_iface"
+    uci add firewall forwarding >/dev/null
+    uci set firewall.@forwarding[-1].src="$lan_iface" >/dev/null
+    uci set firewall.@forwarding[-1].dest="$wg_iface" >/dev/null
     debug_write "[ROUTES] Added forwarding: $lan_iface -> $wg_iface"
-    uci add firewall forwarding
-    uci set firewall.@forwarding[-1].src="$wg_iface"
-    uci set firewall.@forwarding[-1].dest="$lan_iface"
+    uci add firewall forwarding >/dev/null
+    uci set firewall.@forwarding[-1].src="$wg_iface" >/dev/null
+    uci set firewall.@forwarding[-1].dest="$lan_iface" >/dev/null
     debug_write "[ROUTES] Added forwarding: $wg_iface -> $lan_iface"
     uci commit firewall 2>/dev/null
     debug_write "[ROUTES] Firewall UCI committed"
     /etc/init.d/firewall reload 2>/dev/null
     sleep 2
     debug_write "[ROUTES] Firewall reloaded"
-        for wg_iface_loop in $(grep "^[0-9]\+ wg_" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
+        for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
             if nft add rule inet fw4 "accept_from_$wg_iface_loop" counter accept 2>/dev/null; then
                 debug_write "[ROUTES] Re-added accept_from_$wg_iface_loop after reload"
             fi
@@ -3953,7 +3953,7 @@ set_lan_routes() {
                 debug_write "[ROUTES] Re-added accept_to_$wg_iface_loop after reload"
             fi
         done
-        for wg_iface_loop in $(grep "^[0-9]\+ wg_" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
+        for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
             if nft add rule inet fw4 srcnat oifname "$wg_iface_loop" jump "srcnat_${wg_iface_loop}" 2>/dev/null; then
                 debug_write "[ROUTES] Re-added srcnat jump for $wg_iface_loop after reload"
             fi
@@ -3961,10 +3961,6 @@ set_lan_routes() {
     if [ $wg_id_found -eq 0 ] && [ -n "$wg_id" ]; then
         state_write "ID_${wg_id}_IS_RT_TABLES_IN_USE" "1" 2>/dev/null
     fi
-    echo "DEBUG: lan_ip=$lan_ip"
-    echo "DEBUG: wg_ip=$wg_ip"
-    echo "DEBUG: subnet=$subnet"
-    echo "DEBUG: table_name=$table_name"
     success "Routes configured successfully!"
     nft add rule inet fw4 srcnat oifname "$wg_iface" jump "srcnat_$wg_iface" 2>/dev/null
     debug_write "[UP] Added srcnat jump for $wg_iface"
@@ -3992,10 +3988,9 @@ unset_lan_routes() {
         warning "Interface $wg_iface was not marked as routed, but attempting cleanup anyway"
     fi
     local table_name="_vpn_${wg_iface}_${lan_iface}"
-    if ! grep "[[:space:]]$table_name$" /etc/iproute2/rt_tables 2>/dev/null; then
+    if ! grep -q "[[:space:]]$table_name$" /etc/iproute2/rt_tables > /dev/null; then
         debug_write "[ROUTES UNSET] No routes configured for $wg_iface <-> $lan_iface"
-        warning "No routes configured for $wg_iface <-> $lan_iface (table '$table_name' not found!)"
-        return 0
+        error "No routes configured for $wg_iface <-> $lan_iface (table '$table_name' not found!)"
     fi
     log "Removing routes for $lan_iface (via $wg_iface)..."
     local wg_ip=$(uci get "network.$wg_iface.addresses" 2>/dev/null | cut -d/ -f1)
@@ -4106,7 +4101,7 @@ unset_lan_routes() {
     debug_write "[ROUTES UNSET] Verification - IP rules after cleanup:"
     debug ip rule show | grep -E "($subnet|$wg_ip|$table_name)" || true
     debug_write "[ROUTES UNSET] Verification - Table $table_name after cleanup:"
-    debug ip route show table "$table_name" 2>/dev/null || echo "Table $table_name does not exist"
+    debug ip route show table "$table_name" 2>/dev/null || verbose echo "Table $table_name does not exist!"
     debug_write "[ROUTES UNSET] Extra cleanup: removing any orphaned rules for $table_name"
     local orphan_rules=$(ip rule show | grep "lookup $table_name" | awk '{print $1}' | sed 's/://')
     for prio in $orphan_rules; do

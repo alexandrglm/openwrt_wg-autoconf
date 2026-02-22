@@ -1,0 +1,24 @@
+@startuml
+title wg-autoconf routes set wg_myconfig port3
+
+start
+:Create routing table:\n_vpn_wg_myconfig_port3;
+:Add dynamic IP rules\n(priority = table_id * 10);
+
+if (Routes exist?) then (yes)
+  :Add routes:\nsubnet -> port3\n(default -> wg_myconfig);
+  :Create firewall zone &\nforwarding rules;
+  :Reload firewall\n(triggers nftables rebuild);
+  :Re-add nftables rules\n(critical workaround);
+  :Write state: IS_RT_TABLES_IN_USE=1;
+  note right
+    Result: All traffic from
+    port3 subnet routes
+    through VPN
+  end note
+else (no)
+  :Handle missing routes;
+endif
+
+stop
+@enduml
