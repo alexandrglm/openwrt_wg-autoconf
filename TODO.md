@@ -4,7 +4,26 @@
 - [ ] -> Create Wiki. Create Wiki self-hosted/portfolio
 - [ ] - Re-implement [`websocket-shell-react`](https://github.com/alexandrglm/websocket-shell-react) to provide a 'live test demo`**
 
-### Session 14 2020-02-22
+
+### Session 15 2026-03-09
+
+- [X] - **Refactor NFT subsystem** 
+    Migrated all manual NFT rules to proper include files in `/usr/share/nftables.d/` following the fw4 standard. Rules are now persistent and fully integrated
+
+- [X] **Add selective IP leak blocking (WITHOUT REQUIRING a `/etc/init.d/network restart`!!!)**
+    System automatically analyses whether the WG peer is IPv4-only, IPv6-only or dual-stack, based on dest interface address + the configured endpoint address for select4ed WG peer:
+    - **IPv4-only**: Complete IPv6 blocking on the target interface (input/forward/output chains) plus  `/proc/sys/net/ipv6/conf/$iface/disable_ipv6` and flush.
+    - **IPv6-only**: IPv4 blocking in forward chain (**BUT preserving local IPv4 access to the router**)
+    - **Dual-stack**: No blocking applied, both protocols traverse the VPN
+
+    As an example, when blocking IPv6 for IPv4-only peers, the system now:
+        - Disables IPv6 at kernel level via sysctl
+        - Flushes existing IPv6 routes and addresses
+        - Uses `ubus` to reload only the affected interface (leaving PPPoE and other connections untouched)
+        - **Properly restores IPv6 when routes are removed, including link-local address regeneration and RA announcements**
+
+
+### Session 14 2026-02-22
 
 - [X] - Proceed with a deeper staging, tests EVERY error case, validation, multiple scenario
 - [X] - Test multi-routing behaviour with every possible usecase-scenario

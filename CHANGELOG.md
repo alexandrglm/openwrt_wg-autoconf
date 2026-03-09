@@ -1,4 +1,10 @@
 ## From 0.0.1-r6
+
+
+- [X] - Refactor NFT subsystem 
+- [X] - Add selective IP leak blocking (WITHOUT REQUIRING a `/etc/init.d/network restart`!!!)
+- [X] - Add IPv6 full routing support (IPv4/IPv6/Dual Stack modes)
+
 - [X] **Downgrade versions to `0.0.1-rX` until the final version for inclusion in the OpenWRT repositories is finalised, with that latter being `1.0.0-r1`**
 - [X] - Added a flag-method to replace APK lifecycle methods. Logic to prevent "disasters" is now more robust, depending on the binary itself rather than `apk add`/`apk del`/`apk add --upgrade` actions.
 - [X] - Refactored cleanup and "nuke" functions into a single centralised function
@@ -9,7 +15,7 @@
 - [X] - Add fully IPv6 support
 - [X] - Add DNS leakage notice
 - [X] - Add DNS resolv pre-checks for auto and `--advanced` mode
-- [ ] - Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
+- [X] - Fix CLI-UI:   `ui_lines`, CLI colours, for a better CLI - UI
 
 
 

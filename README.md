@@ -2,7 +2,7 @@
 
 Automated WireGuard configuration tool for OpenWrt. Supports multiple simultaneous WG clients with selective LAN routing + WireGuard server mode with multiple connected clients. Automatic firewall, DNS, routing and policy-based traffic management, safe operations
 
-**Version:** v1.0.0-r1
+**Version:** v1.0.0
 
 ---
 
@@ -23,6 +23,8 @@ Automated WireGuard configuration tool for OpenWrt. Supports multiple simultaneo
 
 Requires OpenWrt 25.12+ with APK package manager enabled.
 
+> [!WARNING]
+> **wg-autoconf uses the new APK package format** (Alpine Linux). Supported on OpenWrt 25.12+ with APK enabled. At the time no Opkg is offered for older systems (but planned).
 
 1. VIA LOCAL APK
 ```bash
@@ -487,11 +489,11 @@ For a test on a 2010 device (Arcadyan VRV9510KWAC23, 1 CPU CORE @ 500MHz, 100Mb 
 /etc/iproute2/rt_tables                   Routing tables
 
 /usr/libexec/wg-autoconf/states           Interface state (persistent)
-/usr/libexec/wg-autoconf/user_settings   User settings override
-/usr/libexec/wg-autoconf/debug/          Debug logs
-/usr/libexec/wg-autoconf/configs/        Generated server configs
+/usr/libexec/wg-autoconf/user_settings    User settings override
+/usr/libexec/wg-autoconf/debug/           Debug logs
+/usr/libexec/wg-autoconf/configs/         Generated server configs
 
-/etc/init.d/wg-autoconf_boot_cleanup     Boot cleanup service
+/etc/init.d/wg-autoconf_boot_cleanup      Boot cleanup service
 ```
 
 ---
@@ -507,5 +509,3 @@ See [DOCS.md](./DOCS.md) for complete technical documentation, architecture, des
 MIT
 
 ---
-
-Made for OpenWrt with 🥰

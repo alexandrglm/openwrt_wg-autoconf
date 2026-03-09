@@ -44,6 +44,11 @@ NETWORK_CONF="/etc/config/network"
 DHCP_CONF="/etc/config/dhcp"
 FIREWALL_CONF="/etc/config/firewall"
 
+
+NFT_INCLUDE_DIR="/usr/share/nftables.d"
+NFT_SRCNAT_DIR="${NFT_INCLUDE_DIR}/chain-post/srcnat"
+NFT_FORWARD_DIR="${NFT_INCLUDE_DIR}/chain-post/forward"
+
 BACKUP_PATHS="$NETWORK_CONF $DHCP_CONF $FIREWALL_CONF"
 
 ATOMIC_PATHS="/usr/libexec/wg-autoconf/atomics"
@@ -1072,7 +1077,6 @@ validate_wg_config() {
 
             # DEBUG! r7
             #   Room for custom fields-messages for test_configurations()
-            #   And ... this is my first nested func using ash xD
             warning "VALIDATION ERROR!: $msg" >&2
             return 1
         
@@ -1557,6 +1561,56 @@ validate_wg_config() {
 }
 
 
+#####################################################################
+# HELPER -> Check WG IP type
+# ipv4_only, ipv6_only, dual_stack
+#####################################################################
+detect_wg_ip_usage() {
+    local wg_iface="$1"
+    
+    local has_ipv4=0
+    local has_ipv6=0
+    local has_ipv6_endpoint=0
+    
+    # 1. CHECK WG IFACE ADDR MODES
+    local wg_address=$(uci get network.$wg_iface.addresses 2>/dev/null)
+    
+    if echo "$wg_address" | grep -q '\.'; then
+        
+        has_ipv4=1
+    
+    fi
+    
+    if echo "$wg_address" | grep -q ':'; then
+        
+        has_ipv6=1
+    
+    fi
+    
+    # 2. Revisar el endpoint (si es IPv6 literal, entonces sí hay IPv6)
+    # 2.    CHECK ENDPOINT ADDR TYPE
+    local peer_section="network.${wg_iface}_peer"
+    local endpoint_host=$(uci get "$peer_section.endpoint_host" 2>/dev/null)
+    
+    if echo "$endpoint_host" | grep -q ':' && ! echo "$endpoint_host" | grep -q '[a-zA-Z]'; then
+        has_ipv6_endpoint=1
+    fi
+
+    #    - IF WG_IFACE is IPv6 local -> IPv6
+    #    - IF ENDPOINT is IPv6 -> es IPv6
+    #    - OTHERWISE IPv4
+    if [ "$has_ipv6" -eq 1 ] || [ "$has_ipv6_endpoint" -eq 1 ]; then
+        
+        echo "ipv6_only"
+    
+    elif [ "$has_ipv4" -eq 1 ]; then
+    
+        echo "ipv4_only"
+    
+    else
+        echo "ipv4_only"
+    fi
+}
 
 
 #####################################################################
@@ -1989,7 +2043,7 @@ show_header() {
 # SHOW HELP/UPSAGE
 #####################################################################
 # DEBUG!
-# TODO: Update commnands, look for more "likable" styles, idk
+# TODO: Update commnands, look for better styles... or idk
 show_usage() {
     
     echo ""
@@ -2519,7 +2573,7 @@ test_config() {
     ui_lines 79 "${YELLOW}FULL CONFIGURATION VALIDATION${NC}"
     echo ""
     
-    # 1.2.1 REQUIRED FIELDS FROM COND
+    # 1.2.1 REQUIRED FIELDS FROM CON
     local required_fields="PrivateKey PublicKey Address Endpoint AllowedIPs"
     local optional_fields="DNS"
     
@@ -2588,7 +2642,7 @@ test_config() {
     
     # 3. OPTIONAL (DNS SPECIFIC ISSUES) VALIDATION
     # DEBUG! r7 ... maybe allowed_ips should be there
-    #               Room for future SWITCH/BYPASS
+    #               Room for future SWITCH/BYPASS?
     for field in $optional_fields; do
         
         local value=$(get_conf_value "$field" "$conf_file" "raw")
@@ -3991,70 +4045,70 @@ activate_interface() {
         sleep 2
     
     fi
-    # DEBUG!    At this point,NFT chains, jump to, forwards, are BROKEN
-    # So ...
-    # 10.   NFT CHAINS FIX -> MANDATORIIIIIISIMO
-    debug_write "[UP] Applying nftables workarounds for $iface"
-    
-    # 10.1 ADD MISSING INPUT JUMP IF NEEDED
-    if ! nft list chain inet fw4 input | grep -q "iifname.*$iface.*jump input_$iface"; then
-        
-        nft add rule inet fw4 input iifname "$iface" jump "input_$iface"
-        debug_write "[UP] Added missing input jump for $iface"
-    
-    fi
 
-    # 10.2 ADD MISSING OUTPUT JUMP IF NEEDED
-    if ! nft list chain inet fw4 output | grep -q "oifname.*$iface.*jump output_$iface"; then
-        
-        nft add rule inet fw4 output oifname "$iface" jump "output_$iface"
-        
-        debug_write "[UP] Added missing output jump for $iface"
+    # 10    NFT.D PRE-STRUCTURING
+    debug_write "[UP] Creating NFT include files (workarounds) for $iface"
+
+    mkdir -p "${NFT_INCLUDE_DIR}/chain-post/input" 2>/dev/null
+    mkdir -p "${NFT_INCLUDE_DIR}/chain-post/output" 2>/dev/null
+    mkdir -p "${NFT_INCLUDE_DIR}/chain-post/forward" 2>/dev/null
+    mkdir -p "${NFT_SRCNAT_DIR}" 2>/dev/null
     
-    fi
-
-    # 10.3 ENSURE ACCEPT CHAINS HAVE RULES
-    debug_write "[UP] Force adding accept rules for $iface"
-
-    # DEBUG!
-    # TODO:  Add if exist verification ... but in a real working mode!
-    nft add rule inet fw4 "accept_from_$iface" counter accept
-    nft add rule inet fw4 "accept_to_$iface" counter accept
-
-    # POST-IF VERIFY
-    if nft add rule inet fw4 "accept_from_$iface" counter accept 2>/dev/null; then
-        
-        debug_write "[UP] accept_from_$iface OK"
-        
-        verbose success "[UP] accept_from_$iface OK"
+    # 10.1 INPUT JUMP
+    local input_file="${NFT_INCLUDE_DIR}/chain-post/input/91-wg-${iface}-jump.nft"
+    cat > "$input_file" <<EOF
+# wg-autoconf: Input jump para $iface (workaround)
+# wg-autoconf:Creado: $(date)
+iifname "$iface" jump input_$iface
+EOF
+    debug_write "[UP] Created: $input_file"
     
-    else
-        
-        debug_write "[UP ERROR] Failed to add rule to accept_from_$iface"
-        
-        warning "[ERROR] Failed to add rule to accept_from_$iface"
-    
-    fi
 
-    if nft add rule inet fw4 "accept_to_$iface" counter accept 2>/dev/null; then
-        
-        debug_write "[UP] accept_to_$iface OK"
-        
-        verbose success "[UP] accept_to_$iface OK"
-    
-    else
-        
-        debug_write "[UP ERROR] Failed to add rule to accept_to_$iface"
-        
-        warning "[ERROR] Failed to add rule to accept_to_$iface"
-    
-    fi
 
-    # 10.4 ENSURE SNAT CHAIN HAS JUMP
-    nft add rule inet fw4 srcnat oifname "$iface" jump "srcnat_$iface" 2>/dev/null
-    debug_write "[UP] Added srcnat jump for $iface"
+    # 10.2 OUTPUT JUMP
+    local output_file="${NFT_INCLUDE_DIR}/chain-post/output/91-wg-${iface}-jump.nft"
+    cat > "$output_file" <<EOF
+# wg-autoconf: Output jump para $iface (workaround)
+# wg-autoconf:Creado: $(date)
+oifname "$iface" jump output_$iface
+EOF
+    debug_write "[UP] Created: $output_file"
+    
 
-    # 11. VERIFY WITH WG SHOW (IF AVAILABLE)
+
+    # 10.3 ACCEPT RULES
+    local accept_file="${NFT_INCLUDE_DIR}/chain-post/forward/91-wg-${iface}-accept.nft"
+    cat > "$accept_file" <<EOF
+# wg-autoconf: Accept rules para $iface (workaround)
+# wg-autoconf:Creado: $(date)
+iifname "$iface" accept
+oifname "$iface" accept
+EOF
+    debug_write "[UP] Created: $accept_file"
+
+
+
+
+
+    # 10.4 SRCNAT JUMP
+    local srcnat_file="${NFT_SRCNAT_DIR}/91-wg-${iface}-jump.nft"
+    cat > "$srcnat_file" <<EOF
+# wg-autoconf: Srcnat jump para $iface (workaround)
+# wg-autoconf:Creado: $(date)
+meta oifname "$iface" jump srcnat_$iface
+EOF
+    debug_write "[UP] Created: $srcnat_file"
+    
+
+
+    # 10.5  COMMIT/RELOAD FOR NFTs
+    debug_write "[UP] Reloading firewall to apply workaround includes"
+    /etc/init.d/firewall reload 2>/dev/null
+    # sleep 1
+
+
+
+    # 11. VERIFY WITH WG SHOW 
     if [ "$CAP_WG" = "1" ]; then
         
         if wg show "$iface" >/dev/null 2>&1; then
@@ -4090,23 +4144,7 @@ activate_interface() {
         fi
     fi
 
-
-
-
-    # 13. VERIFICACIÓN FINAL 
-    debug_write "[UP] Final nftables state for $iface:"
-    
-    # nft list chain inet fw4 "accept_from_$iface" 2>/dev/null | while read line; do
-        
-    #     debug_write "  $line"
-    #     echo "  $line"
-    # done
-    # nft list chain inet fw4 "accept_to_$iface" 2>/dev/null | while read line; do
-    #     debug_write "  $line"
-    #     echo "  $line"
-    # done
-
-    # 14. D0NE
+    # 13. D0NE
     success "Interface '$iface' enabled!"
     debug_write "[UP] Interface $iface successfully enabled"
     echo ""
@@ -4151,21 +4189,29 @@ deactivate_interface() {
     log "Disabling $iface..."
     debug_write "[DOWN] Removing interface configuration"
 
-    # 2.5 VERIFY INTERFACE IS NOT ROUTED (AUTO-RECOVERY)
+    
+    # 2.5 VERIFY IFACE NOT ROUTED (AUTO-RECOVERY)
     if [ -n "$iface_id" ]; then
+        
         local is_routed=$(state_read "ID_${iface_id}_IS_ROUTED" 2>/dev/null)
         
         if [ "$is_routed" = "1" ]; then
+            
             warning "Interface $iface is still ROUTED. Attempting to unset routes first..."
             
-            # Auto-recovery: find and clean all _vpn_ tables
+            # 2.5.1 IF ROUTED AUTORECOVERY -
+            # DEBUG r7  find and clean all _vpn_ tables
             local vpn_tables=$(grep "_vpn_${iface}_" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
             
             for table in $vpn_tables; do
+                
                 local lan_iface=$(echo "$table" | sed "s/^_vpn_${iface}_//")
+                
                 if [ -n "$lan_iface" ]; then
+                
                     unset_lan_routes "$iface" "$lan_iface" >/dev/null 2>&1
                     debug_write "[DOWN] Auto-unset routes for $iface <-> $lan_iface"
+                
                 fi
             done
             
@@ -4173,19 +4219,29 @@ deactivate_interface() {
         fi
     fi
 
-    # 3. REMOVE PEERS (IF WG AVAILABLE)
+    # 3. REMOVE PEERS
     if [ "$CAP_WG" = "1" ]; then
+        
         local peers=$(wg show "$iface" peers 2>/dev/null | tr '\n' ' ')
         
         if [ -n "$peers" ]; then
+            
             wg set "$iface" peer $peers remove 2>/dev/null
             debug_write "[DOWN] Removed peers from $iface"
+        
         else
+        
             debug_write "[DOWN] No peers found for $iface"
+        
         fi
+    
     else
+    
         debug_write "[DOWN] wg binary not available, skipping peer cleanup"
+    
     fi
+
+
 
     # 4. DELETE INTERFACE FROM KERNEL
     if ip link show "$iface" >/dev/null 2>&1; then
@@ -4283,6 +4339,8 @@ deactivate_interface() {
                 done
             fi
             
+
+
             # 4.2.5 EXTRA CLEANUP ORPHANED RULES BY INTERFACE NAME
             debug_write "[DOWN] Cleaning up any remaining ip rules for $iface"
             
@@ -4296,11 +4354,27 @@ deactivate_interface() {
             
             done
 
+            # 4.2.6 CLEAN NFT.D FILES 
+            debug_write "[DOWN] Cleaning up NFT workaround include files for $iface"
             
-            # 4.2.6 NFTABLES CLEANUP REMOVED
-            debug_write "[DOWN] Skipping manual NFT cleanup (fw4 will regenerate from UCI)"
+            # 4.2.6.1   DEL input/output jumps
+            find "${NFT_INCLUDE_DIR}/chain-post/input" -name "91-wg-${iface}-*.nft" -exec rm -f {} \; 2>/dev/null
+            find "${NFT_INCLUDE_DIR}/chain-post/output" -name "91-wg-${iface}-*.nft" -exec rm -f {} \; 2>/dev/null
+            
+            # 4.2.6.2   DEL accept rules
+            find "${NFT_INCLUDE_DIR}/chain-post/forward" -name "91-wg-${iface}-*.nft" -exec rm -f {} \; 2>/dev/null
+            
+            # 4.2.6.3   del srcnat jumps
+            find "${NFT_SRCNAT_DIR}" -name "91-wg-${iface}-*.nft" -exec rm -f {} \; 2>/dev/null
+            
+            debug_write "[DOWN] NFT workaround include files cleaned up"
+
+            # # 4.2.7 NFTABLES CLEANUP REMOVED
+            # debug_write "[DOWN] Skipping manual NFT cleanup (fw4 will regenerate from UCI)"
 
         # 4.3 IFDOWN FALLBACK
+        # DEBUG r7, SESSION 16
+        # TODO: Is an ifdown fallback really needed? If so EVERYTHING (rules, nft,etc) would need to be replicated!!!
         else
             
             debug_write "[DOWN WARNING] Failed to delete interface $iface"
@@ -4336,6 +4410,7 @@ deactivate_interface() {
     if [ -n "$iface_id" ]; then
         
         if state_write "ID_${iface_id}_IS_ACTIVE" "0"; then
+            
             debug_write "[DOWN] State updated: ID_${iface_id}_IS_ACTIVE=0"
         
         else
@@ -4576,10 +4651,10 @@ remove_wireguard() {
         debug_write "[REMOVE] Backup cleanup: removed=$removed_backups, kept=$kept_backups"
     fi
 
-    # 11. FINAL NFT CLEANUP - SAFETY NET (only if chains remain)
+    # 11. FINAL NFT CLEANUP (BUT! only if chains remain)
     if [ "$CAP_NFTABLES" = "1" ]; then
         
-        # DEBUG! Safety cleanup - should not be needed if deactivate_interface worked
+        # DEBUG! Safety cleanup ... should not be needed if deactivate_interface worked???
         local orphan_chains=""
         
         for chain in input_${iface} output_${iface} forward_${iface} \
@@ -4668,9 +4743,10 @@ remove_wireguard() {
 
 
 #####################################################################
-# HIGH-LEVEL COMMANDS - SERVER FUNCTIONS
+# SERVER FUNCTIONS
 #####################################################################
-
+# DEBUG r7
+# As for 1.0.0 rel, server options are DISABLED by default (still working on  them)
 server_create() {
     
 
@@ -5014,33 +5090,22 @@ config_save_user() {
 
     local config_file="${config_dir}/${user_name}.conf"
 
+
+    # DEBUG! r7
+    # ALLOWED IPS NEED A SOLUTION...Hardcoding is OK but ... in which scenarios an user will need to short/narrow the AIPs range?
     cat > "$config_file" <<EOF
 # wg-autoconf $VERSION Client .conf
-# Server: $server_name
-# User: $user_name
-# Generated: $(date)
-
+# wg-autoconf - Server: $server_name
+# wg-autoconf - User: $user_name
+# wg-autoconf - Generated: $(date)
 [Interface]
-# User Private Key (KEEP SECRET!)
 PrivateKey = $user_privkey
-
-# User IP Address on VPN
 Address = ${user_ip}/32
-
-# DNS Servers
 DNS = $server_dns
-
 [Peer]
-# Server Public Key
 PublicKey = $server_pubkey
-
-# Server Endpoint (hostname:port)
 Endpoint = ${endpoint}:${port}
-
-# Traffic to route through VPN
 AllowedIPs = 0.0.0.0/0, ::/0
-
-# Keep connection alive
 PersistentKeepalive = 25
 EOF
 
@@ -5049,9 +5114,9 @@ EOF
     
     success "Config generated for user '$user_name'"
     echo ""
-    echo "=== Config Preview ==="
+    ui_lines 9 "Config Preview"
     cat "$config_file"
-    echo "======================"
+    ui_lines 10
     
     return 0
 }
@@ -5070,43 +5135,43 @@ server_generate_client_template() {
     
     mkdir -p "$(dirname "$template_file")" 2>/dev/null
 
-    cat > "$template_file" <<EOF
-# WireGuard Server: $server_name
-#
-- SERVER INFORMATION:
-    Public Key: $server_pubkey
-    Endpoint: ${endpoint}:${port}
-    Subnet: $subnet
-    DNS: $server_dns
-#
-- ADDING USERS:
-  Command: wg-autoconf server add $server_name <username>
-  This will auto-generate a complete .conf file for the user
-#
-- CONFIG FILES:
-  Each user config is saved in: ${server_name}/<username>.conf
-#
-- IMPORTING IN WIREGUARD APP:
-   1. Download the .conf file from this directory
-   2. Open WireGuard app on your device
-   3. Click (+) button
-   4. Select "Create from file"
-   5. Choose the .conf file
-   6. Connect!
-#
-CLIENT TEMPLATE (if generating manually):
-#
-[Interface]
-PrivateKey = <user_private_key>
-Address = <assigned_ip>/32
-DNS = $server_dns
-[Peer]
-PublicKey = $server_pubkey
-Endpoint = ${endpoint}:${port}
-AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 25
-# EOF
-EOF
+
+    # DEBUG! r7
+    # ALLOWED IPS NEED A SOLUTION...Hardcoding is OK but ... in which scenarios an user will need to short/narrow the AIPs range?
+    echo "# WireGuard Server: $server_name" > "$template_file"
+    echo "#" >> "$template_file"
+    echo "# - SERVER INFORMATION:" >> "$template_file"
+    echo "#     Public Key: $server_pubkey" >> "$template_file"
+    echo "#     Endpoint: ${endpoint}:${port}" >> "$template_file"
+    echo "#     Subnet: $subnet" >> "$template_file"
+    echo "#     DNS: $server_dns" >> "$template_file"
+    echo "#" >> "$template_file"
+    echo "# - ADDING USERS:" >> "$template_file"
+    echo "#   Command: wg-autoconf server add $server_name <username>" >> "$template_file"
+    echo "#   This will auto-generate a complete .conf file for the user" >> "$template_file"
+    echo "#" >> "$template_file"
+    echo "# - CONFIG FILES:" >> "$template_file"
+    echo "#   Each user config is saved in: ${server_name}/<username>.conf" >> "$template_file"
+    echo "#" >> "$template_file"
+    echo "# - IMPORTING IN WIREGUARD APP:" >> "$template_file"
+    echo "#    1. Download the .conf file from this directory" >> "$template_file"
+    echo "#    2. Open WireGuard app on your device" >> "$template_file"
+    echo "#    3. Click (+) button" >> "$template_file"
+    echo "#    4. Select \"Create from file\"" >> "$template_file"
+    echo "#    5. Choose the .conf file" >> "$template_file"
+    echo "#    6. Connect!" >> "$template_file"
+    echo "#" >> "$template_file"
+    echo "# CLIENT TEMPLATE (if generating manually):" >> "$template_file"
+    echo "#" >> "$template_file"
+    echo "[Interface]" >> "$template_file"
+    echo "PrivateKey = <user_private_key>" >> "$template_file"
+    echo "Address = <assigned_ip>/32" >> "$template_file"
+    echo "DNS = $server_dns" >> "$template_file"
+    echo "[Peer]" >> "$template_file"
+    echo "PublicKey = $server_pubkey" >> "$template_file"
+    echo "Endpoint = ${endpoint}:${port}" >> "$template_file"
+    echo "AllowedIPs = 0.0.0.0/0, ::/0" >> "$template_file"
+    echo "PersistentKeepalive = 25" >> "$template_file"
 
     chmod 644 "$template_file"
     debug_write "[CONFIG] Generated README: $template_file"
@@ -5164,9 +5229,8 @@ server_handler() {
 
 
 #####################################################################
-# CONFIG GENERATION - SERVER FUNCTIONS
+# SERVER CONFIG GENERATION
 #####################################################################
-
 config_generate_keypair() {
     
     local privkey=$(wg genkey)
@@ -6756,19 +6820,35 @@ cleanup() {
         if [ "$CAP_NFTABLES" = "1" ]; then
             
             for chain in $all_nft_chains; do
-                
+            
                 if nft list chain inet fw4 "$chain" >/dev/null 2>&1; then
-                
                     debug_write "[NUKE] Removing orphaned NFT chain: $chain"
-                
                     nft delete chain inet fw4 "$chain" 2>/dev/null
                 fi
-            
             done
         fi
 
+        # 6.5  CLEAN NFT.D's
+        debug_write "[NUKE] Removing all wg-autoconf NFT include files"
+
+        # 6.5.1 BY NAME
+        find /usr/share/nftables.d/ -name "*-wg-*.nft" -exec rm -f {} \; 2>/dev/null
+        find /usr/share/nftables.d/ -name "96-block-ipv*.nft" -exec rm -f {} \; 2>/dev/null
+        find /usr/share/nftables.d/ -name "96-allow-ipv*.nft" -exec rm -f {} \; 2>/dev/null
+        find /usr/share/nftables.d/ -name "95-vpn-*.nft" -exec rm -f {} \; 2>/dev/null
+        find /usr/share/nftables.d/ -name "91-wg-*.nft" -exec rm -f {} \; 2>/dev/null
+
+        # 6.5.2 BY CONTENT ("wg-autoconf")
+        grep -l "wg-autoconf" /usr/share/nftables.d/**/9*.nft 2>/dev/null | while read -r file; do
+            rm -f "$file"
+            debug_write "[NUKE] Removed NFT file (by content): $file"
+        done
+
+        debug_write "[NUKE] NFT include files cleaned up"
 
 
+
+        # 6.5.3  CLEANUP ORPHANED ROUTING TABLES (by ID)
 
         # 6.4 CLEANUP ORPHANED ROUTING TABLES (by ID)
         debug_write "[NUKE] Looking for orphaned routing tables by ID"
@@ -7194,55 +7274,197 @@ set_lan_routes() {
     uci set firewall.@forwarding[-1].dest="$lan_iface" >/dev/null
     debug_write "[ROUTES] Added forwarding: $wg_iface -> $lan_iface"
 
-    # 11. COMMIT UCI CHANGES
+    # 11. PRE-COMMIT UCI CHANGES
     uci commit firewall 2>/dev/null
     debug_write "[ROUTES] Firewall UCI committed"
 
-    # 12. RELOAD FIREWALL
+    # 12    NFT RULES HANDLER
+    verbose log "Creating NFT include file for masquerade rules..."
+    
+    #12.1   DIR
+    mkdir -p "${NFT_SRCNAT_DIR}" 2>/dev/null
+    
+    # 12.2   95-vpn-${wg_iface}-${lan_iface}.nft FILE
+    local nft_file="${NFT_SRCNAT_DIR}/95-vpn-${wg_iface}-${lan_iface}.nft"
+
+    cat > "$nft_file" <<EOF
+# wg-autoconf: srcnat rule to route $lan_iface through $wg_iface
+# wg-autoconf: Created: $(date)
+# wg-autoconf: This rule ensures that traffic LEAVING through $wg_iface
+# wg-autoconf: has its source masked (SNAT) with the IP of $wg_iface.
+meta oifname "$wg_iface" masquerade
+EOF
+    
+    debug_write "[ROUTES] Created NFT include file: $nft_file"
+    verbose success "NFT include file created for $wg_iface"
+
+    # 12.3  IP MODES:   ipv4_only, ipv6_only, dual_stack
+    verbose log "Checking WireGuard IP usage to prevent leaks..."
+    
+    # 12.3.1    GET detect_wg_ip_usage
+    local wg_ip_usage=$(detect_wg_ip_usage "$wg_iface")
+    debug_write "[ROUTES] WireGuard $wg_iface detected as: $wg_ip_usage"
+
+
+    # 12.3.2 then
+    mkdir -p "/usr/share/nftables.d/chain-post/forward" 2>/dev/null
+    mkdir -p "/usr/share/nftables.d/chain-post/input" 2>/dev/null
+    
+    # 12.3.2.1  IIPV4
+    case "$wg_ip_usage" in
+        ipv4_only)
+
+            verbose log "WireGuard uses ONLY IPv4 → Blocking IPv6 leaks for $lan_iface"
+            
+            mkdir -p "/usr/share/nftables.d/chain-post/input" 2>/dev/null
+            mkdir -p "/usr/share/nftables.d/chain-post/forward" 2>/dev/null
+            mkdir -p "/usr/share/nftables.d/chain-post/output" 2>/dev/null
+            
+            # 12.3.2.1.1    BLOCK input IPV6 Bloquear IPv6 
+            local block_input="/usr/share/nftables.d/chain-post/input/96-block-ipv6-${lan_iface}.nft"
+            cat > "$block_input" <<EOF
+# wg-autoconf: Block IPv6 in input for $lan_iface (WG IPv4-only)
+# wg-autoconf: Created: $(date)
+meta nfproto ipv6 drop
+EOF
+            
+            # 12.3.2.1.2 BLOCK forward IPV6
+            local block_forward="/usr/share/nftables.d/chain-post/forward/96-block-ipv6-${lan_iface}.nft"
+            cat > "$block_forward" <<EOF
+# wg-autoconf: Block IPv6 in forward for $lan_iface (WG IPv4-only)
+# wg-autoconf: Created: $(date)
+meta nfproto ipv6 drop
+EOF
+            
+            # 12.3.2.1.3 BLOCK output IPv6
+            local block_output="/usr/share/nftables.d/chain-post/output/96-block-ipv6-${lan_iface}.nft"
+            cat > "$block_output" <<EOF
+# wg-autoconf: Block IPv6 in foutput for $lan_iface (WG IPv4-only)
+# wg-autoconf: Created: $(date)
+meta nfproto ipv6 drop
+EOF
+            
+            debug_write "[ROUTES] Created IPv6 block files for $lan_iface chains"
+            
+
+            # 12.3.2.1.4
+            verbose log "Removing IPv6 from /proc/sys ... on $real_lan_iface..."
+            
+            # 12.3.2.1.4.1 STOP odhcpd
+            debug_write "[IPv6] Stopping odhcpd..."
+            /etc/init.d/odhcpd stop
+            
+            # 12.3.2.1.4.2 DISABLE IPv6
+            local proc_path="/proc/sys/net/ipv6/conf/$real_lan_iface/disable_ipv6"
+            if [ -f "$proc_path" ]; then
+                
+                echo 1 > "$proc_path" 2>/dev/null
+                
+                debug_write "[IPv6] Disabled IPv6 on $real_lan_iface via sysctl"
+            
+            else
+                
+                debug_write "[IPv6] WARNING: $proc_path not found"
+            
+            fi
+            
+            # 12.3.2.1.4.3 FLUSH IPV6 ROUTES
+            debug_write "[IPv6] Flushing IPv6 routes for $real_lan_iface"
+            ip -6 route flush dev "$real_lan_iface" 2>/dev/null
+            
+            # 12.3.2.1.4.4 DEL IPv6 ADRRESS
+            debug_write "[IPv6] Removing IPv6 addresses from $real_lan_iface"
+            ip -6 addr show dev "$real_lan_iface" 2>/dev/null | grep inet6 | awk '{print $2}' | while read addr; do
+                
+                debug_write "[IPv6] Removing address: $addr"
+                ip -6 addr del "$addr" dev "$real_lan_iface" 2>/dev/null
+            
+            done
+            
+            # 12.3.2.1.4.5 START odhcpd AGAIN
+            debug_write "[IPv6] Restarting odhcpd..."
+            /etc/init.d/odhcpd start
+            
+            # 12.3.2.1.4    CHECKS/NOTICES
+            local remaining=$(ip -6 addr show dev "$real_lan_iface" 2>/dev/null | grep -c inet6)
+            if [ "$remaining" -eq 0 ]; then
+                
+                success "IPv6 removed from $real_lan_iface"
+            
+            else
+                
+                warning "IPv6 may still be present on $real_lan_iface ($remaining addresses)"
+            fi
+            ;;
+
+
+        # 12.3.2.2   IPV6
+        ipv6_only)
+            verbose log "WireGuard uses ONLY IPv6 → Blocking IPv4 leaks for $lan_iface (preserving local IPv4)"
+            
+            # 12.3.2.2.1 BLOCK forward IPV4 LEAKS TO WAN
+            local block_forward="/usr/share/nftables.d/chain-post/forward/96-block-ipv4-${lan_iface}.nft"
+            cat > "$block_forward" <<EOF
+# wg-autoconf: Block IPv4 in forward for $lan_iface (WG IPv6-only)
+# wg-autoconf: Created: $(date)
+# wg-autoconf: Prevents IPv4 traffic from $lan_iface from exiting via WAN
+iifname "$lan_iface" meta nfproto ipv4 drop
+EOF
+            
+            # 12.3.2.2.2     BLOCK outputIPv4
+            local block_output="/usr/share/nftables.d/chain-post/output/96-block-ipv4-${lan_iface}.nft"
+            cat > "$block_output" <<EOF
+# wg-autoconf: Block IPv4 in output for $lan_iface (WG IPv6-only)
+# wg-autoconf: Created: $(date)
+oifname "$lan_iface" meta nfproto ipv4 drop
+EOF
+            
+            # 12.3.2.2.3 ALLOW LOCAL input IPv4
+            local allow_input="/usr/share/nftables.d/chain-post/input/96-allow-ipv4-local-${lan_iface}.nft"
+            cat > "$allow_input" <<EOF
+# wg-autoconf: Allow LOCAL IPv4 for $lan_iface (WG IPv6-only)
+# wg-autoconf: Created: $(date)
+# wg-autoconf: Allows clients on $lan_iface to access the router via IPv4
+iifname "$lan_iface" meta nfproto ipv4 accept
+EOF
+            
+            debug_write "[ROUTES] Created IPv4 block files + local IPv4 allowance for $lan_iface"
+            ;;
+            
+
+        # 12.3.2.3   IPV6/IPV4 
+        dual_stack)
+            
+            verbose log "WireGuard uses DUAL STACK (IPv4+IPv6) → No blocking needed for $lan_iface"
+            
+            # 12.3.2.3.1    PRE-CLEANING NEEDED
+            rm -f "/usr/share/nftables.d/chain-post/forward/96-block-ipv4-${lan_iface}.nft" 2>/dev/null
+            rm -f "/usr/share/nftables.d/chain-post/forward/96-block-ipv6-${lan_iface}.nft" 2>/dev/null
+            rm -f "/usr/share/nftables.d/chain-post/output/96-block-ipv4-${lan_iface}.nft" 2>/dev/null
+            rm -f "/usr/share/nftables.d/chain-post/output/96-block-ipv6-${lan_iface}.nft" 2>/dev/null
+            rm -f "/usr/share/nftables.d/chain-post/input/96-allow-ipv4-local-${lan_iface}.nft" 2>/dev/null
+            
+            # AND NO MORE AS DUAL IS THE "deault"
+            ;;
+    esac
+
+    # 13. COMMIT-RELOAD FIREWALL
+    debug_write "[ROUTES] Reloading firewall to apply all changes..."
     /etc/init.d/firewall reload 2>/dev/null
-    sleep 2
+    # sleep 2
     debug_write "[ROUTES] Firewall reloaded"
-
-    # 13. WORKAROUND NFTABLES FIX HEADACHE!
-        # 13.1 RE-ADD ACCEPT RULES FOR ALL WG INTERFACES
-        for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
-
-            if nft add rule inet fw4 "accept_from_$wg_iface_loop" counter accept 2>/dev/null; then
-                debug_write "[ROUTES] Re-added accept_from_$wg_iface_loop after reload"
-            fi
-
-            if nft add rule inet fw4 "accept_to_$wg_iface_loop" counter accept 2>/dev/null; then
-                debug_write "[ROUTES] Re-added accept_to_$wg_iface_loop after reload"
-            fi
-        done
-
-        # 13.2 RE-ADD SRCNAT JUMPS FOR ALL WG INTERFACES
-        for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}'); do
-
-            if nft add rule inet fw4 srcnat oifname "$wg_iface_loop" jump "srcnat_${wg_iface_loop}" 2>/dev/null; then
-                debug_write "[ROUTES] Re-added srcnat jump for $wg_iface_loop after reload"
-            fi
-        done
-
 
     # 14. STATES
     if [ $wg_id_found -eq 0 ] && [ -n "$wg_id" ]; then
         state_write "ID_${wg_id}_IS_RT_TABLES_IN_USE" "1" 2>/dev/null
     fi
 
-
     # 15. D0NE!!
     success "Routes configured successfully!"
     
-
-
-    # 10.4 ENSURE SRCAT CHAIN HAS JUMP (para SNAT FIX)
-    # HEADACHE
-    nft add rule inet fw4 srcnat oifname "$wg_iface" jump "srcnat_$wg_iface" 2>/dev/null
-    debug_write "[UP] Added srcnat jump for $wg_iface"
-    
     return 0
 }
+
 
 #####################################################################
 # WG-AUTOCONF UNSET_LAN_ROUTES
@@ -7392,10 +7614,103 @@ unset_lan_routes() {
     ip route flush table "$table_name" 2>/dev/null
     debug_write "[ROUTES UNSET] Flushed table $table_name"
 
-    # 7. REMOVE NFTABLES RULES -> DEBUG! REMOVED AS FW4 HANDLE THIS NOW
-    debug_write "[ROUTES UNSET] Skipping manual NFT cleanup (fw4 will regenerate from UCI)"
 
 
+    # 7 NFT.D CLEANGINGS
+    verbose log "Cleaning up NFT files for $lan_iface..."
+
+    # 7.1. DEL 95-vpn-${wg_iface}-${lan_iface}.nft"
+    local nft_file="${NFT_SRCNAT_DIR}/95-vpn-${wg_iface}-${lan_iface}.nft"
+    if [ -f "$nft_file" ]; then
+        
+        rm -f "$nft_file"
+        debug_write "[ROUTES UNSET] Removed masquerade file: $nft_file"
+    
+    fi
+
+    # 7.2 DEL IPV4 BLOCK FILES -> ipv6_only MODE
+    rm -f "/usr/share/nftables.d/chain-post/forward/96-block-ipv4-${lan_iface}.nft" 2>/dev/null
+    rm -f "/usr/share/nftables.d/chain-post/output/96-block-ipv4-${lan_iface}.nft" 2>/dev/null
+    rm -f "/usr/share/nftables.d/chain-post/input/96-allow-ipv4-local-${lan_iface}.nft" 2>/dev/null
+
+    # 7.3 DEL IPV6 BLOCK FILES -> ipv4_only MODE
+    rm -f "/usr/share/nftables.d/chain-post/input/96-block-ipv6-${lan_iface}.nft" 2>/dev/null
+    rm -f "/usr/share/nftables.d/chain-post/forward/96-block-ipv6-${lan_iface}.nft" 2>/dev/null
+    rm -f "/usr/share/nftables.d/chain-post/output/96-block-ipv6-${lan_iface}.nft" 2>/dev/null
+
+    debug_write "[ROUTES UNSET] Removed all NFT leak prevention files for $lan_iface"
+
+
+
+    # 7.4   RESTORE IPV6
+    if [ -n "$real_lan_iface" ] && [ -n "$lan_iface" ]; then
+        
+        verbose log "Restoring IPv6 on $real_lan_iface (UCI: $lan_iface)..."
+        
+        # 7.4.1 VIA /proc/sys....
+        local proc_path="/proc/sys/net/ipv6/conf/$real_lan_iface/disable_ipv6"
+        if [ -f "$proc_path" ]; then
+            
+            # NETIFD-ALIKE FORCE
+            echo 1 > "$proc_path" 2>/dev/null
+            sleep 1
+            echo 0 > "$proc_path" 2>/dev/null
+            debug_write "[UNSET] Reset IPv6 stack on $real_lan_iface"
+        fi
+        
+        # 7.4.2 Force netifd to reprocess the UCI interface
+        # DEBUG! r7 This applies the netifd patch fix shown in ODHCPD REPO ISSUES
+        debug_write "[UNSET] Reprocessing UCI interface $lan_iface via ubus..."
+        ubus call network.interface.$lan_iface down 2>/dev/null
+        sleep 1
+        ubus call network.interface.$lan_iface up 2>/dev/null
+        
+        # 7.4.3. WAIT FOR DAD 
+        debug_write "[UNSET] Waiting for DAD (Duplicated Address Detection)..."
+        sleep 3
+        
+        # 7.4.4 FORCE RA's WITH  -SIGUSR1
+        if pidof odhcpd >/dev/null 2>&1; then
+            
+            kill -SIGUSR1 $(pidof odhcpd) 2>/dev/null
+            debug_write "[UNSET] Sent SIGUSR1 to odhcpd to refresh RAs"
+        
+        else
+        
+            /etc/init.d/odhcpd restart
+            debug_write "[UNSET] odhcpd restarted"
+        
+        fi
+        
+
+        # 7.5 CHEKS
+        local ipv6_addrs=$(ip -6 addr show dev "$real_lan_iface" 2>/dev/null | grep -c "inet6")
+        if [ "$ipv6_addrs" -gt 0 ]; then
+            
+            success "IPv6 restored on $real_lan_iface ($ipv6_addrs addresses)"
+        
+        else
+            
+            warning "IPv6 may not be fully restored on $real_lan_iface"
+            debug_write "[UNSET] Manual check: ip -6 addr show dev $real_lan_iface"
+        fi
+    
+    else
+        
+        debug_write "[UNSET WARNING] No interface info available, skipping IPv6 restore"
+    
+    fi
+
+
+    # # 7. REMOVE NFTABLES RULES -> DEBUG! REMOVED AS FW4 HANDLE THIS NOW
+    # debug_write "[ROUTES UNSET] Skipping manual NFT cleanup (fw4 will regenerate from UCI)"
+
+
+    # DEBUG! r7
+    # TODO: It is VERY likely that, from this point on, all removals are NOT necessary 
+    #       thanks to how NFT is manipulated previously... BUUUUT, I firmly believe 
+    #       that it is more important to not leave orphans than to pretend everything 
+    #       worked well in previous steps
 
     # 8. REMOVE FIREWALL RULES FROM UCI (FIND DYNAMICALLY)
     debug_write "[ROUTES UNSET] Removing firewall forwarding rules..."
@@ -9032,7 +9347,7 @@ state_remove_iface() {
 #
 #####################################################################
 #####################################################################
-# STATE_LIST_IFACES - CORREGIDA (SIN SUBSHELL)
+# STATE_LIST_IFACES
 #####################################################################
 state_list_ifaces() {
 

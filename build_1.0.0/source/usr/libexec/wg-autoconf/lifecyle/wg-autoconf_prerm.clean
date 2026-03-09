@@ -1,305 +1,153 @@
-#!/bin/ash
-# 1.0.0-r1 pre_deinstall() lifecycle method
-# Attempts wg-autoconf nuke first, falls back to complete manual cleanup
-
 NFT_INCLUDE_DIR="/etc/nftables.d"
 NFT_SRCNAT_DIR="${NFT_INCLUDE_DIR}/chain-post/srcnat"
 STATE_DIR="/usr/libexec/wg-autoconf"
 STATE_FILE="${STATE_DIR}/states"
 DEBUG_PATH="${STATE_DIR}/debug"
-
 cleanup_success=0
-
-
-# 1) PRE_DEINSTALL NUKE -> if binary exists, let it do the work
 if [ -x /usr/bin/wg-autoconf ]; then
-    
     if /usr/bin/wg-autoconf nuke 2>/dev/null; then
-        
         echo "[wg-autoconf PRE_DEINSTALL] Full deinstalling NUKE successful!" > /dev/kmsg
         echo -e "\033[1;32m[OK]\033[0m Ensuring a clean state prior to uninstallation via wg-autoconf nuke ..."
         cleanup_success=1
-    
     else
-
         echo "[wg-autoconf PRE_DEINSTALL] Deinstall NUKE failed, using fallback emergency cleanup" > /dev/kmsg
         echo -e "\033[1;33m[WARNING]\033[0m Ensuring a clean state prior to uninstallation manually (wg-autoconf nuke failed!) ..."
         cleanup_success=0
     fi
-
 else
-
     echo "[wg-autoconf PRE_DEINSTALL] wg-autoconf binary not found, using fallback cleanup" > /dev/kmsg
     echo -e "\033[1;33m[WARNING]\033[0m Ensuring a clean state prior to uninstallation manually (wg-autoconf bin not found!) ..."
     cleanup_success=0
-
 fi
-
-
-# 2) PRE_DEINSTALL EMERGENCY FALLBACK
 if [ $cleanup_success -eq 0 ]; then
-
     echo "[wg-autoconf PRE_DEINSTALL] Starting fallback emergency cleanup" > /dev/kmsg
     echo -e "\033[1;34m[wg-autoconf]\033[0m Starting fallback cleanup..."
-
-
-    # 2.1 INTERFACE CLEANUP --> remove ALL WireGuard interfaces
     echo "[wg-autoconf] Cleaning WireGuard interfaces from kernel" > /dev/kmsg
-    
-    # 2.1.1 VIA IP
     for iface in $(ip link show 2>/dev/null | grep -oE "wg[0-9a-zA-Z_-]*" | sort -u); do
-        
         ip link delete "$iface" 2>/dev/null && \
             echo "[wg-autoconf PRE_DEINSTALL] Removed interface: $iface" > /dev/kmsg
-    
     done
-
-
-    # 2.1.2 VIA UCI
     echo "[wg-autoconf PRE_DEINSTALL] Cleaning WireGuard configurations from UCI" > /dev/kmsg
-    
-    # 2.1.2.1 UCI NETWORK IFACES wg*
     uci show network 2>/dev/null | grep "network\.wg[^=]*=interface" | \
     cut -d. -f2 | cut -d= -f1 | while read -r iface; do
-    
         uci delete "network.$iface" 2>/dev/null
         uci delete "network.${iface}_peer" 2>/dev/null
-        
         echo "[wg-autoconf PRE_DEINSTALL] Removed UCI config for: $iface" > /dev/kmsg
-    
     done
-    
-    # 2.1.2.2 UCI FIREWALL ZONES wg*
     uci show firewall 2>/dev/null | grep "firewall\.@zone\[[0-9]\].*\.name='" | grep "wg" | \
     while read -r line; do
-        
         zone_index=$(echo "$line" | cut -d. -f2 | tr -d '[]' | cut -d= -f1)
-        
         uci delete "firewall.@zone[$zone_index]" 2>/dev/null
-        
         echo "[wg-autoconf PRE_DEINSTALL] Removed firewall zone index: $zone_index" > /dev/kmsg
     done
-    
-
-    # 2.1.2.3 UCI FIREWALL FORWARDINGS wg*
     uci show firewall 2>/dev/null | grep "firewall\.@forwarding\[[0-9]\].*\.src='" | grep "wg" | \
     while read -r line; do
-        
         fwd_index=$(echo "$line" | cut -d. -f2 | tr -d '[]' | cut -d= -f1)
-        
         uci delete "firewall.@forwarding[$fwd_index]" 2>/dev/null
         echo "[wg-autoconf PRE_DEINSTALL] Removed forwarding index: $fwd_index" > /dev/kmsg
-    
     done
-    
-    # 2.1.2.4 UCI FIREWALL RULES (Allow-WireGuard-*)
     uci show firewall 2>/dev/null | grep "firewall\.@rule\[[0-9]\].*\.name='" | grep "Allow-WireGuard" | \
     while read -r line; do
-        
         rule_index=$(echo "$line" | cut -d. -f2 | tr -d '[]' | cut -d= -f1)
-        
         uci delete "firewall.@rule[$rule_index]" 2>/dev/null
         echo "[wg-autoconf PRE_DEINSTALL] Removed firewall rule index: $rule_index" > /dev/kmsg
-    
     done
-    
-    # 2.1.2.5 UCI DHCP wg
     uci show dhcp 2>/dev/null | grep "dhcp\.wg" | cut -d. -f2 | cut -d= -f1 | while read -r dhcp_cfg; do
-        
         uci delete "dhcp.$dhcp_cfg" 2>/dev/null
-        
         echo "[wg-autoconf PRE_DEINSTALL] Removed DHCP config: $dhcp_cfg" > /dev/kmsg
     done
-
-    # 2.2 UCI COMMITS (después de todas las eliminaciones)
     uci commit network 2>/dev/null
     uci commit firewall 2>/dev/null
     uci commit dhcp 2>/dev/null
-
-    # 2.3 ROUTING TABLE CLEANUP -> remove ALL wg_* and _vpn_* tables
     echo "[wg-autoconf PRE_DEINSTALL] Cleaning routing tables" > /dev/kmsg
-    
-    # 2.3.1 RT_TABLES wg | _vpn_
     local all_tables=$(grep -E '^[0-9]+[[:space:]]+(wg|_vpn_)' /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
-    
     for table in $all_tables; do
-        
         echo "[wg-autoconf PRE_DEINSTALL] Removing table: $table" > /dev/kmsg
-        
-        # 2.3.1.1 GET ID
         local table_id=$(grep "[[:space:]]$table$" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $1}')
-        
-        # 2.3.1.2 FLUSH BEFORE!!!! BEFORE!!!
         [ -n "$table_id" ] && ip route flush table "$table_id" 2>/dev/null
-        
-        # 2.3.1.3 REMOVE FROM RT_
         sed -i "/^[0-9]\+[[:space:]]\+${table}$/d" /etc/iproute2/rt_tables 2>/dev/null
-    
     done
-    
-
-    # 2.3.2 ORPHANED 1 -> RT_TABLES BUT NO NAME
     local all_table_ids=$(ip route show table all 2>/dev/null | \
                           grep -E 'table [0-9]+' | \
                           sed 's/.*table \([0-9]\+\).*/\1/' | \
                           sort -u)
-    
     for tid in $all_table_ids; do
-        
-        # 2.3.2.1 CHECK IF ID HAS NAME IN RT_TABLES
         local table_name=$(grep "^$tid[[:space:]]" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $2}')
-        
-        # 2.3.2.2 NO NAME? ORPHANED -> FLUSH
         if [ -z "$table_name" ] || ! echo "$table_name" | grep -E '^(wg|_vpn_)' >/dev/null; then
-            
             echo "[wg-autoconf PRE_DEINSTALL] Flushing orphaned table ID: $tid" > /dev/kmsg
             ip route flush table "$tid" 2>/dev/null
         fi
-    
     done
-
-
-    # 2.4 ORPHANED 2 -> IP RULES CLEANUP
     echo "[wg-autoconf PRE_DEINSTALL] Cleaning orphaned IP rules" > /dev/kmsg
-    
-    # 2.4.1 IP RULE SHOW BY NAME
     ip rule show | grep -E "lookup (wg|_vpn_)" | while read rule; do
-        
         local priority=$(echo "$rule" | awk '{print $1}' | sed 's/://')
-        
         ip rule del priority "$priority" 2>/dev/null
-        
         echo "[wg-autoconf PRE_DEINSTALL] Removed rule priority $priority" > /dev/kmsg
     done
-    
-    # 2.4.2 IP RULE SHOW BY ID (orphaned)
     ip rule show | grep "lookup [0-9]\+" | while read rule; do
-        
         local priority=$(echo "$rule" | awk '{print $1}' | sed 's/://')
         local table_id=$(echo "$rule" | grep -o 'lookup [0-9]\+' | awk '{print $2}')
-        
-        # 2.4.2.1 CHECK RT_ AGAIN THEN DEL RULE BY PRIOR
         if ! ip route show table "$table_id" 2>/dev/null | grep -q .; then
-            
             ip rule del priority "$priority" 2>/dev/null
             echo "[wg-autoconf PRE_DEINSTALL] Removed orphaned rule priority $priority (table $table_id)" > /dev/kmsg
         fi
     done
-
-
-    # 2.5 NFT.D's
     echo "[wg-autoconf PRE_DEINSTALL] Cleaning NFT include files" > /dev/kmsg
-    
-    # 2.5.1 Eliminar todos los archivos .nft creados por wg-autoconf
     if [ -d "$NFT_INCLUDE_DIR" ]; then
-        
         find "$NFT_INCLUDE_DIR" -name "*.nft" -exec grep -l "wg-autoconf" {} \; 2>/dev/null | while read -r nft_file; do
-        
             rm -f "$nft_file" 2>/dev/null
             echo "[wg-autoconf PRE_DEINSTALL] Removed NFT include: ${nft_file##*/}" > /dev/kmsg
-        
         done
     fi
-
-
-    # 2.6 NFT CHAINS CLEANUP
     if command -v nft >/dev/null 2>&1; then
-        
         echo "[wg-autoconf PRE_DEINSTALL] Cleaning NFT chains" > /dev/kmsg
-        
-        # 2.6.1 FIND CHAINS
         local wg_chains=$(nft list table inet fw4 2>/dev/null | \
                           grep -o 'chain [a-zA-Z0-9_]*wg[a-zA-Z0-9_]*' | \
                           sed 's/chain //' | sort -u)
-        
-        # 2.6.2 DEL CHAINS
         for chain in $wg_chains; do
-            
             nft delete chain inet fw4 "$chain" 2>/dev/null
             echo "[wg-autoconf PRE_DEINSTALL] Removed NFT chain: $chain" > /dev/kmsg
-        
         done
     fi
-
-
-    # 2.7 RESTORE BACKUPS
     echo "[wg-autoconf PRE_DEINSTALL] Restoring configuration backups" > /dev/kmsg
     local restored=0
-    
-    # 2.7.1 BACKUPS VERIFS
     for backup in /etc/config/*.BACKUP_PRE_WIREGUARD; do
-        
         [ -f "$backup" ] || continue
-        
         original="${backup%.BACKUP_PRE_WIREGUARD}"
         config_name=$(basename "$original")
-        
-        # 2.7.1.2 CHECK TAG
         if head -1 "$backup" | grep -q "WG_AUTOCONF_BACKUP"; then
-
-            # 2.7.1.3 GET CONTENT (sin tags)
             if sed '1d; $d' "$backup" > "$original" 2>/dev/null; then
-            
                 rm -f "$backup" 2>/dev/null
                 restored=$((restored + 1))
-                
                 echo "[wg-autoconf PRE_DEINSTALL] Restored backup for: $config_name" > /dev/kmsg
                 echo -e "\033[1;32m[OK]\033[0m Restored backup: $config_name"
-            
             else
-
-                # 2.7.2 RETAIN STRANGE CASES
                 echo "[wg-autoconf PRE_DEINSTALL] Failed to restore backup for: $config_name" > /dev/kmsg
                 echo -e "\033[1;33m[WARNING]\033[0m Failed to restore backup: $config_name"
-            
             fi
-        
-
-        # 2.7.3 RETAIN INVALIDS
         else
-            
             echo "[wg-autoconf PRE_DEINSTALL] Skipping invalid backup (missing tag): $(basename "$backup")" > /dev/kmsg
             echo -e "\033[1;33m[WARNING]\033[0m Skipping invalid backup: $(basename "$backup")"
-        
         fi
     done
-
-
-    # 2.8   FINAL UCI COMMITS/RELOADS
     if [ $restored -gt 0 ]; then
-        
         echo "[wg-autoconf PRE_DEINSTALL] Committing UCI changes ($restored configs restored)" > /dev/kmsg
-        
         uci commit network 2>/dev/null
         uci commit dhcp 2>/dev/null
         uci commit firewall 2>/dev/null
-
         /etc/init.d/firewall reload 2>/dev/null && \
             echo "[wg-autoconf PRE_DEINSTALL] Firewall reloaded" > /dev/kmsg
     fi
-
     echo "[wg-autoconf PRE_DEINSTALL] Emergency deinstalling cleanup successful!" > /dev/kmsg
     echo -e "\033[1;32m[OK]\033[0m Emergency cleanup completed"
-
 fi
-
-
-# 3) LAST PRE_DEINSTALL
-
 echo "[wg-autoconf PRE_DEINSTALL] Cleaning up remaining files" > /dev/kmsg
 echo -e "\033[1;34m[wg-autoconf]\033[0m Cleaning up files..."
-
-# 3.1 wg-autoconf_boot_cleanup
 /etc/init.d/wg-autoconf_boot_cleanup stop 2>/dev/null
 /etc/init.d/wg-autoconf_boot_cleanup disable 2>/dev/null
-
-# 3.2 OTHERS
 rm -rf /tmp/wg-backup 2>/dev/null
 rm -rf /etc/wireguard/put_conf_files_here 2>/dev/null
 rm -rf /usr/libexec/wg-autoconf/ 2>/dev/null
-
-
 echo "[wg-autoconf PRE_DEINSTALL] Pre-deinstall lifecycle cleanup completed!" > /dev/kmsg
 echo -e "\033[1;32m[OK]\033[0m Pre-deinstall cleanup finished!"
-
 exit 0

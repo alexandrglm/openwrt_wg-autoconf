@@ -64,7 +64,7 @@ Complete technical reference for `wg-autoconf`: architecture, internals, design 
 ***
 
 ##### wg-autoconf routes set wg_myconfig lan3
-![](./DOCS/img/DIAGRAMS/routes_set.png)
+![](./DOCS/img/DIAGRAMS/ROUTES_SET.png)
 1. Create routing table: _vpn_wg_myconfig_lan3
 2. Add dynamic IP rules (priority = table_id * 10)
 3. Add routes: subnet → lan3, default → wg_myconfig
@@ -559,36 +559,27 @@ config forwarding
 Both required for bidirectional communication, even in a "defaults INPUT/FORWARD DROP/REJECT" scenario.
 
 
-### NFTables Chain Interaction
+### NFTables Integration
 
-When firewall reloads, it **regenerates all nftables chains**. This destroys custom rules added by wg-autoconf.
+wg-autoconf uses OpenWrt's native nftables include system for all custom firewall rules. Instead of adding rules directly with `nft add rule` (which would be lost on firewall reload), all the post-routing needed rules are written as persistent files in `/usr/share/nftables.d/`.
 
-**But It Is Fixed:** After firewall reload, automatically re-add all custom nftables rules:
+**Rule Locations:**
 
-```bash
-fw_reload_with_wg_detection() {
-    
-    # 1. A reload that deletes some NFT chains by 'fw4' design (by a fw4/nft for openwrt bug)
-    /etc/init.d/firewall reload
-    sleep 2
-    
-    # 1. Check ALL wg* interfaces (from rt_tables + ip link)
-    for wg_iface in $(all_wg_interfaces); do
-        
-        # 1. Re-add custom accept rules we know fw4/nft deletes
-        nft add rule inet fw4 "accept_from_$wg_iface" counter accept
-        nft add rule inet fw4 "accept_to_$wg_iface" counter accept
-        
-        # 2. Also, re-add SNAT deleted rules
-        nft add rule inet fw4 srcnat oifname "$wg_iface" jump "srcnat_${wg_iface}"
-    
-    done
+- **SNAT/Masquerade rules:** `/usr/share/nftables.d/chain-post/srcnat/95-vpn-<wg_iface>-<lan_iface>.nft`
+- **Forwarding rules:** `/usr/share/nftables.d/chain-post/forward/95-vpn-<wg_iface>-<lan_iface>.nft`
+- **Base accept rules:** `/usr/share/nftables.d/chain-post/input/90-wg-<wg_iface>.nft`
 
-}
+**How It Works:**
+
+1. When `routes set` is called, wg-autoconf creates a file with the masquerade rule
+2. When firewall reloads, `fw4` automatically includes all `.nft` files from these directories
+3. Rules persist across reboots and firewall reloads
+4. When `routes unset` is called, the file is deleted
+
+**Example generated file:**
+```nft
+meta oifname "wg_us-vpn" masquerade
 ```
-
-##### Idempotent `nft add`
-*  `nft add` succeeds even if rule exists, while `create` fails.
 
 ---
 
@@ -689,8 +680,7 @@ OpenWrt uses NFTables for firewall. When you reload firewall config, it:
 
 Problem: Custom rules added by wg-autoconf are lost.
 
-### The Solution
-
+### The Previous Steps (before edging nft.d files as the best solution)
 As explained before, changes made on commit "1.0.0-r1 Session 13.:
 - Re-apply nftables rules after firewall reload
 
@@ -729,6 +719,7 @@ all_wg_interfaces=$(...)
 - `rt_tables` has all server tables
 - `ip link` shows only active interfaces
 - Combining ensures no missed interfaces
+
 
 ---
 
@@ -907,9 +898,8 @@ result=$([ -z "$x" ] && echo "empty" || echo "full")
    - Each `routes set` causes firewall reload
    - Multiple `routes set` calls = multiple reloads
 
-### Optimization Tips
-
-**Batch operations:**
+   
+### **Batch operations**
 
 ```bash
 # Slow (3 firewall reloads):
@@ -921,17 +911,17 @@ wg-autoconf routes set wg1 lan5
 # (Current implementation reloads per route, will be optimised)
 ```
 
-**Disable debug if not needed:**
+#### **Disable debug if not needed:**  
 
-Debug functions were created for evaluations, being so much verbosed.
-Comes disabled by default.
-
+Debug functions were created for evaluations, being so much verbosed.  
+Comes disabled by default.  
+  
 ```bash
 wg-autoconf debug off
 # Debug logging adds overhead
 ```
 
-**Disable boot cleanup if not needed:**
+#### **Disable boot cleanup if not needed:**
 
 ```bash
 /etc/init.d/wg-autoconf_boot_cleanup disable
@@ -944,12 +934,12 @@ wg-autoconf debug off
 
 ### State File Corruption
 
-**Symptoms:**
+**Symptoms:**  
 - Commands fail with "state file not found" errors
 - State reads don't work
 
-**Diagnosis:**
-
+**Diagnosis:**  
+   
 ```bash
 # Check file permissions
 ls -la /usr/libexec/wg-autoconf/states
@@ -960,8 +950,8 @@ head -20 /usr/libexec/wg-autoconf/states
 # Validate key-value format
 grep "^[A-Z_]*=" /usr/libexec/wg-autoconf/states | wc -l
 ```
-
-**Fix:**
+ 
+**Fix:**  
 
 ```bash
 # Reset state
@@ -971,11 +961,11 @@ wg-autoconf status  # Recreates empty state
 
 ### Routing Table Overflow
 
-**Symptoms:**
+**Symptoms:**  
 - "Cannot allocate routing table ID" errors
 - Can't add more VPN routes
 
-**Diagnosis:**
+**Diagnosis:**  
 
 ```bash
 cat /etc/iproute2/rt_tables | wc -l
@@ -985,7 +975,7 @@ cat /etc/iproute2/rt_tables | wc -l
 sort /etc/iproute2/rt_tables | uniq -d
 ```
 
-**Fix:**
+**Fix:**  
 
 ```bash
 # Remove unused tables manually
@@ -999,11 +989,11 @@ wg-autoconf nuke
 
 ### IP Rule Orphaning
 
-**Symptoms:**
+**Symptoms:**  
 - Firewall rules exist in nftables but `ip rule show` empty
 - OR `ip rule show` has orphaned rules
 
-**Diagnosis:**
+**Diagnosis:**  
 
 ```bash
 # View all rules
@@ -1019,7 +1009,7 @@ for prio in $(ip rule show | grep -o '^[0-9]*:' | cut -d: -f1); do
     done
 ```
 
-**Fix:**
+**Fix:**  
 
 ```bash
 # Delete orphaned rules manually
@@ -1031,50 +1021,47 @@ ip rule flush
 # (Resets to system defaults, need to re-setup routes)
 ```
 
-### NFTables Chain Mismatch
+### NFTables Rules Missing
 
-**Symptoms:**
-- `nft list ruleset` shows **empty** chains but traffic doesn't flow
-- Firewall appears to have rules but packets dropped
+**Symptoms:**  
+- Traffic stops after firewall reload
+- `nft list ruleset` shows no wg-autoconf rules
 
-**Diagnosis:**
-
+**Diagnosis:**  
 ```bash
-# Check if accept rules exist
-nft list chain inet fw4 accept_from_wg_myconfig
-nft list chain inet fw4 accept_to_wg_myconfig
+# Check if include files exist
+ls -la /etc/nftables.d/chain-post/srcnat/*.nft
+ls -la /etc/nftables.d/chain-post/forward/*.nft
 
-# Check srcnat
-nft list chain inet fw4 srcnat | grep wg_myconfig
-
-# Check if masquerading applied
-nft list chain inet fw4 srcnat_wg_myconfig
+# Check file contents
+cat /etc/nftables.d/chain-post/srcnat/95-*.nft
 ```
 
-**Fix:**
+**Fix:**  
 
 ```bash
-# Re-apply firewall + nftables
-wg-autoconf up wg_myconfig --verbose
-wg-autoconf routes set wg_myconfig lan3 --verbose
+# Recreate rules by re-running routes set
+wg-autoconf routes set wg_myconfig lan3
 
-# Or manually re-add rules
-for iface in $(ip link show type wireguard | grep -o 'wg[^:]*'); do
-    
-    nft add rule inet fw4 "accept_from_$iface" counter accept 2>/dev/null
-    nft add rule inet fw4 "accept_to_$iface" counter accept 2>/dev/null
-    nft add rule inet fw4 srcnat oifname "$iface" jump "srcnat_${iface}" 2>/dev/null
+# Or manually check if directories exist
+mkdir -p /usr/share/nftables.d/chain-post/srcnat
+mkdir -p /usr/share/nftables.d/chain-post/forward
 
-done
+
+# If files are missing but should exist, re-run setup
+wg-autoconf remove wg_myconfig
+wg-autoconf setup myconfig
+wg-autoconf up wg_myconfig
+wg-autoconf routes set wg_myconfig lan3
 ```
 
-### DNS Issues on VPN
+### DNS Issues on VPN  
 
-**Symptoms:**
+**Symptoms:**  
 - IP connectivity works but DNS queries fail
 - `ping 8.8.8.8` works but `ping google.com` fails
 
-**Diagnosis:**
+**Diagnosis:**  
 
 ```bash
 # Check if DNS set on interface
@@ -1090,7 +1077,7 @@ dig @1.1.1.1 google.com
 cat /etc/resolv.conf
 ```
 
-**Fix:**
+**Fix:**  
 
 1. **Check your DNS provider if works!**.  
 Even using a private/paid Wireguard provider, in many cases, the DNS route they provide NEVER WORKS (e.g. ProtonVPN assigns the tunnel gateway 10.x.0.1 IP as DNS ... almost never works, and must be changed!).
@@ -1106,19 +1093,19 @@ ifup wg_myconfig
 wg-autoconf settings set dns "1.1.1.1, 1.0.0.1"
 ```
 
->**Be aware of when it MUST be COMMA-SEPARATED (.conf files) or space-separated (UCI commands).
+>**Be aware of when it MUST be COMMA-SEPARATED (.conf files) or space-separated (UCI commands).**
 ---
 
 ## Development Notes
 
 TODO/CHANGELOG are available to proceed with a review
 
-### State Diagram
+### States Diagram
 
 ![](./DOCS/img/DIAGRAMS/STATE_MACHINE.png)
 
 
-### Code Organization
+### Code Organisation
 
 ```
 wg-autoconf.source
@@ -1473,7 +1460,7 @@ wg-autoconf.source
 
 ### Testing Strategy
 
-Manual testing on:
+Manual testing on:  
 - OpenWrt 25.12+ with APK enabled
 - Multiple device architectures (x86_64, aarch64, armv7)
 - Different busybox versions (1.35.0+)
@@ -1481,15 +1468,14 @@ Manual testing on:
 
 ### Known Limitations
 
-1. **Single Peer per Interface:** WireGuard limitation, not tool
-2. **No IPv6 Routing:** Parsed but not routed
-3. **No Key Rotation:** Manual updates required
-4. **No Web UI:** CLI only. **Pending a luci-proto-x module**
-5. **APK Only:** No Opkg version
+1. **Single Peer per WG Interface:** WireGuard limitation, not tool
+2. **No Key Rotation:** Manual updates required
+3. **No Web UI:** CLI only. **Pending a luci-proto-x module**
+4. **APK Only:** No Opkg version
 
 ---
 
-## Contributing
+## Issues
 
 Found issues? https://github.com/alexandrglm/openwrt_wg-autoconf/issues
 
