@@ -108,6 +108,9 @@ wg-autoconf status
 
 ## Quick Start: WireGuard Server
 
+> [!WARNING]
+> Full server configuration is supported but currently remains in beta. Use with caution as this feature is under active development.
+
 ### 1. Create Server (Interactive)
 
 ```bash
@@ -468,13 +471,10 @@ For a test on a 2010 device (Arcadyan VRV9510KWAC23, 1 CPU CORE @ 500MHz, 100Mb 
 
 ## Limitations
 
-1. **Single Peer per Client Interface:** WireGuard design (not tool limitation)
-2. **No Full Tunnel Automatic:** Requires isolated LANs (not br-lan)
-3. **No IPv6 Routing:** Parsed but not routed
-4. **No Key Rotation:** Manual `.conf` updates required
-5. **No Web UI:** CLI only
-6. **APK Only:** No Opkg version for OpenWrt <24.12
-7. **Boot Cleanup Aggressive:** Removes all configs on reboot (prevents orphans)
+1. **Single Peer per WG Interface:** WireGuard limitation, not tool
+2. **No Key Rotation:** Manual updates required
+3. **No Web UI:** CLI only. **Pending a luci-proto-x module**
+4. **APK Only:** No Opkg version
 
 ---
 
