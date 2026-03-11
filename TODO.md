@@ -1,3 +1,11 @@
+### 1.0.0 -> 1.0.1
+- [ ] - Add Bridge (Devices) routing support (when, at least, one of its childs has ipaddr).
+- [ ] - Add a "Device/Interfaces ready to be routed" interface
+- [ ] - Retake every command/syntax to fit in a better nemo
+- [ ] - Add a luci-proto-X... wg-autoconf module for LuCi
+
+---
+
 ### 0.0.1-r7 -> 1.0.0 r1
 
 ### PENDING
