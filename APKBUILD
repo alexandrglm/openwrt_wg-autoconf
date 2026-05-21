@@ -13,8 +13,8 @@ source="source.tar.gz"
 install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall wg-autoconf.pre-upgrade wg-autoconf.post-upgrade"
 
 prepare() {
-	mkdir -p "$builddir"
-	cp -r "$startdir/source"/* "$builddir/" 2>/dev/null || true
+    mkdir -p "$builddir"
+    cp -r "$srcdir/src/"* "$builddir/"
 }
 
 build() {
@@ -31,5 +31,5 @@ package() {
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/states.clean" "$pkgdir/usr/libexec/wg-autoconf/states"
 }
 sha512sums="
-c8c30108a1151672fea7d39be2462f2a6ffeba8bf0559135205cc38365c37bdb2456c9bcad736d0a7a9582027ee4164ba9bd9563dfcf8fb56688b6b202566619  source.tar.gz
+dca12e107a95c36737acd49a5bbb9d7b7ab0b911a7c7f65eb99dc3a962c6f04b5487a325b3936147a05dc06ec8fad075b92fa9a2efa84c633c08cbbb29d011d9  wg-autoconf_v1.0.0-r1_source.tar.gz
 "
