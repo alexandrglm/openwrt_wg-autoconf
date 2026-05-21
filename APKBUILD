@@ -6,9 +6,9 @@ pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
 url="https://github.com/alexandrglm/openwrt_wg-autoconf"
 arch="noarch"
 license="MIT"
-depends="wireguard-tools"
+depends=""
 makedepends=""
-options="!check !strip !scanelf !tracedeps"
+options="!check !strip !scanelf !checkdepends !default_install"
 source="source.tar.gz"
 install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall wg-autoconf.pre-upgrade wg-autoconf.post-upgrade"
 
@@ -31,5 +31,6 @@ package() {
 	install -Dm755 "$builddir/usr/libexec/wg-autoconf/states.clean" "$pkgdir/usr/libexec/wg-autoconf/states"
 }
 sha512sums="
-fcac4800f2b9a281f06eb42e38ff377c77bc372d36a7275f055101d655b163f633ca23edd3b1ed40d85e45ca9fc47cee22fd557bccd0dcdda06f70025752a213  wg-autoconf_v1.0.0-r1_source.tar.gz
+fcac4800f2b9a281f06eb42e38ff377c77bc372d36a7275f055101d655b163f633ca23edd3b1ed40d85e45ca9fc47cee22fd557bccd0dcdda06f70025752a213  source.tar.gz
+
 "

@@ -19,7 +19,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup APK build environment
-        run: apk add --no-cache alpine-sdk abuild git
+        run:
+          apk add --no-cache alpine-sdk abuild
 
       - name: Setup signing keys
         run: |
