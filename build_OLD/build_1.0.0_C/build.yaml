@@ -13,61 +13,59 @@ on:
 
 jobs:
   compile-c:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
         include:
-          - arch: amd64
-            target: x86_64
-            runner: ubuntu-24.04
-            native: true
+          - name: x86_64
+            triple: x86_64-linux-gnu
+            cross: false
 
-          - arch: aarch64
-            target: aarch64-cortex-a53
-            runner: ubuntu-24.04-arm
-            native: false
+          - name: aarch64-cortex-a53
+            triple: aarch64-linux-gnu
+            cross: true
 
-          - arch: aarch64
-            target: aarch64-cortex-a72
-            runner: ubuntu-24.04-arm
-            native: false
+          - name: aarch64-cortex-a72
+            triple: aarch64-linux-gnu
+            cross: true
 
-          - arch: aarch64
-            target: aarch64-generic
-            runner: ubuntu-24.04-arm
-            native: false
+          - name: aarch64-generic
+            triple: aarch64-linux-gnu
+            cross: true
 
-          - arch: armv7
-            target: arm-cortex-a7_neon-vfpv4
-            runner: ubuntu-24.04
-            native: false
+          - name: arm-cortex-a7_neon-vfpv4
+            triple: arm-linux-gnueabihf
+            cross: true
 
-          - arch: armv7
-            target: arm-cortex-a9
-            runner: ubuntu-24.04
-            native: false
+          - name: arm-cortex-a9
+            triple: arm-linux-gnueabihf
+            cross: true
 
-          - arch: mips
-            target: mips_24kc
-            runner: ubuntu-24.04
-            native: false
+          - name: mips_24kc
+            triple: mips-linux-gnu
+            cross: true
 
-          - arch: mipsel
-            target: mipsel_24kc
-            runner: ubuntu-24.04
-            native: false
+          - name: mipsel_24kc
+            triple: mipsel-linux-gnu
+            cross: true
 
-          - arch: riscv64
-            target: riscv64-generic
-            runner: ubuntu-24.04
-            native: false
+          - name: riscv64-generic
+            triple: riscv64-linux-gnu
+            cross: true
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile natively for x86_64
-        if: matrix.native == true
+      - name: Install cross-compilers
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            gcc-${{ matrix.triple }}
+
+      - name: Compile for ${{ matrix.name }}
         run: |
           cd build_1.0.0_C/C
 
@@ -76,7 +74,21 @@ jobs:
 
             cd "$name"
 
-            gcc -Wall -O2 -static -o "$name" "${name}.c"
+            if [ "${{ matrix.cross }}" = "true" ]; then
+              ${{ matrix.triple }}-gcc \
+                -Wall \
+                -O2 \
+                -static \
+                -o "$name" \
+                "${name}.c"
+            else
+              gcc \
+                -Wall \
+                -O2 \
+                -static \
+                -o "$name" \
+                "${name}.c"
+            fi
 
             cd ..
           done
@@ -85,38 +97,10 @@ jobs:
 
           cp */wg-* ../../binaries/
 
-      - name: Compile for cross-architecture
-        if: matrix.native == false
-        uses: uraimo/run-on-arch-action@v2
-        with:
-          arch: ${{ matrix.arch }}
-          distro: ubuntu20.04
-          githubToken: ${{ github.token }}
-
-          run: |
-            apt-get update
-            apt-get install -y gcc
-
-            cd build_1.0.0_C/C
-
-            for dir in wg-*/; do
-              name=$(basename "$dir")
-
-              cd "$name"
-
-              gcc -Wall -O2 -static -o "$name" "${name}.c"
-
-              cd ..
-            done
-
-            mkdir -p ../../binaries
-
-            cp */wg-* ../../binaries/
-
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.target }}
+          name: binaries-${{ matrix.name }}
           path: binaries/
           retention-days: 1
 

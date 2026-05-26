@@ -1,0 +1,46 @@
+# Maintainer: Alexander Gomez <alexandrgomez@proton.me>
+pkgname=wg-autoconf
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="WireGuard Auto-Configuration tool for OpenWrt"
+url="https://github.com/alexandrglm/openwrt_wg-autoconf"
+arch="noarch"
+license="MIT"
+options="!check !strip !scanelf !scandeps !archcheck !builddeps !deps"
+source="source.tar.gz"
+install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall"
+
+prepare() {
+	mkdir -p "$builddir"
+	cp -r "$startdir/source"/* "$builddir/" 2>/dev/null || true
+}
+
+build() {
+	return 0
+}
+
+package() {
+	install -Dm755 "$builddir/usr/bin/wg-autoconf.clean" "$pkgdir/usr/bin/wg-autoconf"
+
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/wg-get_conf_value" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-get_conf_value"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/wg-interface"      "$pkgdir/usr/libexec/wg-autoconf/lib/wg-interface"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/wg-route"          "$pkgdir/usr/libexec/wg-autoconf/lib/wg-route"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/wg-setup"          "$pkgdir/usr/libexec/wg-autoconf/lib/wg-setup"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/wg-validator"      "$pkgdir/usr/libexec/wg-autoconf/lib/wg-validator"
+
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/chandler.source"                    "$pkgdir/usr/libexec/wg-autoconf/lib/chandler.sh"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.source"                     "$pkgdir/etc/init.d/wg-autoconf_boot_cleanup"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.source"      "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source"    "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.source"   "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
+
+	mkdir -p "$pkgdir/usr/libexec/wg-autoconf/atomics"
+	mkdir -p "$pkgdir/usr/libexec/wg-autoconf/debug"
+
+	cat > "$pkgdir/usr/libexec/wg-autoconf/states" << EOF
+IS_INSTALLED=1
+IS_FIRST_EXEC=1
+IS_PREV_TO_UPGRADE=0
+IS_UPGRADED=0
+EOF
+}
