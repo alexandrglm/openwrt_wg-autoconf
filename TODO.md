@@ -1,16 +1,27 @@
+## TODO
 ### 1.0.0 -> 1.0.1
+- [ ] -> Create Wiki. Create Wiki self-hosted/portfolio
+- [ ] - Re-implement [`websocket-shell-react`](https://github.com/alexandrglm/websocket-shell-react) to provide a 'live test demo`**
+
 - [ ] - Add Bridge (Devices) routing support (when, at least, one of its childs has ipaddr).
 - [ ] - Add a "Device/Interfaces ready to be routed" interface
 - [ ] - Retake every command/syntax to fit in a better nemo
 - [ ] - Add a luci-proto-X... wg-autoconf module for LuCi
 
 ---
-
+## CHANGELOG
 ### 0.0.1-r7 -> 1.0.0 r1
 
-### PENDING
-- [ ] -> Create Wiki. Create Wiki self-hosted/portfolio
-- [ ] - Re-implement [`websocket-shell-react`](https://github.com/alexandrglm/websocket-shell-react) to provide a 'live test demo`**
+### Session 16 2026-05-26
+- [X] - **Migrate most expensive functions to C (1000x literally performance increase)**
+    - [X] `validate_wg_config()` > `wg-validator.c`
+    - [X] `get_conf_value()` > `wg-get_conf_value.c`
+    - [X] `setup_wireguard()` + `remove_wireguard()` > `wg-setup.c`
+    - [X] `activate_interface()` + `deactivate_interface()` > `wg-interface.c`
+    - [X] `set_lan_routes()` + `unset_lan_routes()` > `wg-route.c`
+     
+- [X] **Fix DNS redirect DNAT** on `routes set` / cleanup on `routes unset`
+    - Now, the "DNS issue" is fixed, the user should be noticed in logs/warns     
 
 
 ### Session 15 2026-03-09
