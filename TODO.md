@@ -1,5 +1,9 @@
 ## TODO
-### 1.0.0 -> 1.0.1
+
+- [ ] - **Refactor the entire application: completely separate UI components from all functions**
+    - ***All UI will be called from each function to the required component. This applies to both shell and C components. Each C component must be autonomous, but I cannot constantly duplicate logic (especially UI logic)***
+
+
 - [ ] -> Create Wiki. Create Wiki self-hosted/portfolio
 - [ ] - Re-implement [`websocket-shell-react`](https://github.com/alexandrglm/websocket-shell-react) to provide a 'live test demo`**
 
