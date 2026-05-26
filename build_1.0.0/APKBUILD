@@ -1,4 +1,4 @@
-# Maintainer: Alexander Gomez <alexandrglm@proton.me>
+# Maintainer: Alexander Gomez <alexandrgomez@proton.me>
 pkgname=wg-autoconf
 pkgver=1.0.0
 pkgrel=1
@@ -8,9 +8,9 @@ arch="noarch"
 license="MIT"
 depends="wireguard-tools"
 makedepends=""
-options="!check !strip !scanelf !tracedeps"
+options="!check !strip !scanelf !archcheck"
 source="source.tar.gz"
-install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall wg-autoconf.pre-upgrade wg-autoconf.post-upgrade"
+install="wg-autoconf.post-install wg-autoconf.pre-install wg-autoconf.pre-deinstall"
 
 prepare() {
 	mkdir -p "$builddir"
@@ -23,13 +23,22 @@ build() {
 
 package() {
 	install -Dm755 "$builddir/usr/bin/wg-autoconf.clean" "$pkgdir/usr/bin/wg-autoconf"
-	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.clean" "$pkgdir/etc/init.d/wg-autoconf_boot_cleanup"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.clean" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.clean" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.clean" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postupgrade.clean" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postupgrade.sh"
-	install -Dm755 "$builddir/usr/libexec/wg-autoconf/states.clean" "$pkgdir/usr/libexec/wg-autoconf/states"
+	install -Dm755 "$builddir/../../C/wg-get_conf_value/wg-get_conf_value" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-get_conf_value"
+	install -Dm755 "$builddir/../../C/wg-interface/wg-interface" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-interface"
+	install -Dm755 "$builddir/../../C/wg-route/wg-route" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-route"
+	install -Dm755 "$builddir/../../C/wg-setup/wg-setup" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-setup"
+	install -Dm755 "$builddir/../../C/wg-validator/wg-validator" "$pkgdir/usr/libexec/wg-autoconf/lib/wg-validator"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lib/chandler.source" "$pkgdir/usr/libexec/wg-autoconf/lib/chandler.sh"
+	install -Dm755 "$builddir/etc/init.d/wg-autoconf_boot_cleanup.source" "$pkgdir/etc/init.d/wg-autoconf_boot_cleanup"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_prerm.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_preinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh"
+	install -Dm755 "$builddir/usr/libexec/wg-autoconf/lifecyle/wg-autoconf_postinst.source" "$pkgdir/usr/libexec/wg-autoconf/scripts/wg-autoconf_postinst.sh"
+	mkdir -p "$pkgdir/usr/libexec/wg-autoconf/atomics"
+	mkdir -p "$pkgdir/usr/libexec/wg-autoconf/debug"
+	cat > "$pkgdir/usr/libexec/wg-autoconf/states" << EOF
+IS_INSTALLED=1
+IS_FIRST_EXEC=1
+IS_PREV_TO_UPGRADE=0
+IS_UPGRADED=0
+EOF
 }
-sha512sums="
-c8c30108a1151672fea7d39be2462f2a6ffeba8bf0559135205cc38365c37bdb2456c9bcad736d0a7a9582027ee4164ba9bd9563dfcf8fb56688b6b202566619  source.tar.gz
-"
