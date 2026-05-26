@@ -1,0 +1,274 @@
+name: Build wg-autoconf APK Multi-Arch
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'build_1.0.0_C/**'
+      - 'build_1.0.0_C/APKBUILD'
+  workflow_dispatch:
+
+jobs:
+    compile-c:
+    runs-on: ubuntu-latest
+    strategy:
+        matrix:
+        arch:
+            - target: x86_64
+            runner: ubuntu-24.04
+            native: true
+            - target: aarch64-cortex-a53
+            runner: ubuntu-24.04-arm
+            native: false
+            - target: aarch64-cortex-a72
+            runner: ubuntu-24.04-arm
+            native: false
+            - target: aarch64-generic
+            runner: ubuntu-24.04-arm
+            native: false
+            - target: arm-cortex-a7_neon-vfpv4
+            runner: ubuntu-24.04
+            native: false
+            - target: arm-cortex-a9
+            runner: ubuntu-24.04
+            native: false
+            - target: mips_24kc
+            runner: ubuntu-24.04
+            native: false
+            - target: mipsel_24kc
+            runner: ubuntu-24.04
+            native: false
+            - target: riscv64-generic
+            runner: ubuntu-24.04
+            native: false
+    steps:
+        - uses: actions/checkout@v4
+
+        - name: Compile natively for x86_64
+        if: matrix.arch.native == true
+        run: |
+            cd build_1.0.0_C/C
+            for dir in wg-*/; do
+            name=$(basename "$dir")
+            cd "$name"
+            gcc -Wall -O2 -static -o "$name" "${name}.c"
+            cd ..
+            done
+            mkdir -p binaries
+            cp */wg-* binaries/
+
+        - name: Compile for cross-architecture
+        if: matrix.arch.native == false
+        uses: uraimo/run-on-arch-action@v2
+        with:
+            arch: ${{ matrix.arch.arch }}
+            distro: ubuntu20.04
+            githubToken: ${{ github.token }}
+            run: |
+            apt-get update
+            apt-get install -y gcc
+            cd build_1.0.0_C/C
+            for dir in wg-*/; do
+                name=$(basename "$dir")
+                cd "$name"
+                gcc -Wall -O2 -static -o "$name" "${name}.c"
+                cd ..
+            done
+            mkdir -p ../../binaries
+            cp */wg-* ../../binaries/
+
+        - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+            name: binaries-${{ matrix.arch.target }}
+            path: binaries/
+            retention-days: 1
+
+    build-apk:
+        name: Build APK
+        runs-on: ubuntu-latest
+
+        needs: compile-c
+
+        container:
+        image: alpine:latest
+
+        permissions:
+        contents: write
+
+        strategy:
+        matrix:
+            target:
+            - aarch64-cortex-a53
+            - aarch64-cortex-a72
+            - aarch64-generic
+            - arm-cortex-a7_neon-vfpv4
+            - arm-cortex-a9
+            - mips_24kc
+            - mipsel_24kc
+            - x86_64
+            - riscv64-generic
+
+        steps:
+        - name: Checkout code
+            uses: actions/checkout@v4
+
+        - name: Download binaries for ${{ matrix.target }}
+            uses: actions/download-artifact@v4
+            with:
+            name: binaries-${{ matrix.target }}
+            path: build_1.0.0_C/source/usr/libexec/wg-autoconf/lib/
+
+        - name: Make binaries executable
+            run: |
+            chmod -R 755 build_1.0.0_C/source/usr/libexec/wg-autoconf/lib/
+
+        - name: Setup APK build environment
+            run: |
+            apk add --no-cache alpine-sdk abuild
+
+        - name: Setup signing keys
+            run: |
+            mkdir -p ~/.abuild
+
+            echo "${{ secrets.RSA_PRIVATE_KEY }}" > ~/.abuild/wg-autoconf.rsa
+            echo "${{ secrets.RSA_PUBLIC_KEY }}" > ~/.abuild/wg-autoconf.rsa.pub
+
+            cp ~/.abuild/wg-autoconf.rsa.pub /etc/apk/keys/
+
+            chmod 600 ~/.abuild/wg-autoconf.rsa
+            chmod 644 ~/.abuild/wg-autoconf.rsa.pub
+
+            printf 'PACKAGER_PRIVKEY=%s/.abuild/wg-autoconf.rsa\nPACKAGER="Alexander Gomez <alexandrglm@proton.me>"\n' "$HOME" > ~/.abuild/abuild.conf
+
+        - name: Build APK for ${{ matrix.target }}
+            run: |
+            cd build_1.0.0_C
+
+            tar czf source.tar.gz source/
+
+            abuild -F checksum
+            abuild -F -r
+
+        - name: Find and rename APK
+            id: find_apk
+            run: |
+            cd build_1.0.0_C
+
+            APK_FILE=$(find /home/builder/packages -name "*.apk" 2>/dev/null | head -1)
+
+            if [ -z "$APK_FILE" ]; then
+                APK_FILE=$(find ~/packages -name "*.apk" 2>/dev/null | head -1)
+            fi
+
+            if [ -z "$APK_FILE" ]; then
+                APK_FILE=$(find . -name "*.apk" -not -path "./source/*" 2>/dev/null | head -1)
+            fi
+
+            if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+                NEW_NAME="wg-autoconf-${{ matrix.target }}-${APK_FILE##*/}"
+
+                cp "$APK_FILE" "$NEW_NAME"
+
+                echo "apk_name=$NEW_NAME" >> $GITHUB_OUTPUT
+                echo "apk_path=$NEW_NAME" >> $GITHUB_OUTPUT
+            else
+                echo "ERROR: APK file not found"
+                exit 1
+            fi
+
+        - name: Get version
+            id: get_version
+            run: |
+            cd build_1.0.0_C
+
+            VERSION=$(grep "^pkgver=" APKBUILD | cut -d= -f2 | tr -d '"')
+            REL=$(grep "^pkgrel=" APKBUILD | cut -d= -f2 | tr -d '"')
+
+            echo "VERSION=${VERSION}-r${REL}" >> $GITHUB_OUTPUT
+
+        - name: Upload APK artifact
+            uses: actions/upload-artifact@v4
+            with:
+            name: apk-${{ matrix.target }}
+            path: build_1.0.0_C/${{ steps.find_apk.outputs.apk_path }}
+            if-no-files-found: error
+
+    release:
+        name: Create Release
+        runs-on: ubuntu-latest
+
+        needs: build-apk
+
+        permissions:
+        contents: write
+
+        steps:
+        - name: Checkout code
+            uses: actions/checkout@v4
+
+        - name: Download all APKs
+            uses: actions/download-artifact@v4
+            with:
+            pattern: apk-*
+            path: ./apks
+            merge-multiple: true
+
+        - name: Download public key
+            run: |
+            mkdir -p ./keys
+
+            cp build_1.0.0_C/keys/wg-autoconf-DEBUG.pem.pub ./keys/wg-autoconf.rsa.pub 2>/dev/null || \
+            echo "${{ secrets.RSA_PUBLIC_KEY }}" > ./keys/wg-autoconf.rsa.pub
+
+        - name: Get version
+            id: get_version
+            run: |
+            cd build_1.0.0_C
+
+            VERSION=$(grep "^pkgver=" APKBUILD | cut -d= -f2 | tr -d '"')
+            REL=$(grep "^pkgrel=" APKBUILD | cut -d= -f2 | tr -d '"')
+
+            echo "VERSION=${VERSION}-r${REL}" >> $GITHUB_OUTPUT
+
+        - name: Create Release
+            uses: softprops/action-gh-release@v2
+            with:
+            tag_name: v${{ steps.get_version.outputs.VERSION }}
+            name: wg-autoconf v${{ steps.get_version.outputs.VERSION }}
+
+            body: |
+                ## wg-autoconf v${{ steps.get_version.outputs.VERSION }}
+
+                Multi-arch release supporting:
+                - aarch64 (cortex-a53, cortex-a72, generic)
+                - arm (cortex-a7_neon-vfpv4, cortex-a9)
+                - mips_24kc (big endian)
+                - mipsel_24kc (little endian)
+                - x86_64
+                - riscv64_generic
+
+                ### Installation
+
+                ```bash
+                wget -O /etc/apk/keys/wg-autoconf.rsa.pub \
+                https://github.com/alexandrglm/openwrt_wg-autoconf/releases/download/v${{ steps.get_version.outputs.VERSION }}/wg-autoconf.rsa.pub
+
+                apk add wg-autoconf-${{ steps.get_version.outputs.VERSION }}.apk
+                ```
+
+            files: |
+                ./apks/*.apk
+                ./keys/wg-autoconf.rsa.pub
+
+            prerelease: false
+            draft: false
+
+        - name: Upload APKs as additional artifacts
+            uses: actions/upload-artifact@v4
+            with:
+            name: all-apks
+            path: ./apks/*.apk
+            if-no-files-found: error

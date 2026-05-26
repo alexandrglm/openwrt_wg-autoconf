@@ -1,0 +1,4 @@
+#!/bin/ash
+# 1.0.0-r1 Pre-Install method
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_preinst.sh
+exit 0

@@ -1,0 +1,28 @@
+#!/bin/ash
+# wg-autoconf 1.0.0-r1 post_install() lifecycle methods
+VERSION="1.0.0-r1"
+
+mkdir -p /etc/wireguard/
+touch /etc/wireguard/put_conf_files_here
+
+mkdir /usr/libexec/wg-autoconf/atomics
+cat << 'EOF' > /usr/libexec/wg-autoconf/states
+IS_INSTALLED=1
+IS_FIRST_EXEC=1
+IS_PREV_TO_UPGRADE=0
+IS_UPGRADED=0
+EOF
+if [ -f /tmp/wg-autoconf-is-upgrading ]; then
+    awk '
+        /^IS_UPGRADED=0$/ { print "IS_UPGRADED=1"; next }
+        { print }
+    ' /usr/libexec/wg-autoconf/states > /tmp/states.tmp
+    mv /tmp/states.tmp /usr/libexec/wg-autoconf/states
+    rm /tmp/wg-autoconf-is-upgrading
+fi
+chmod +x /etc/init.d/wg-autoconf_boot_cleanup
+sleep 1
+/etc/init.d/wg-autoconf_boot_cleanup enable 2>/dev/null
+# /etc/init.d/wg-autoconf_boot_cleanup start 2>/dev/null
+echo "[wg-autoconf $VERSION] Succesfully installed!"
+exit 0

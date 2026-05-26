@@ -1,0 +1,191 @@
+name: Build wg-autoconf APK Multi-Arch
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'build_1.0.0_C/**'
+      - 'build_1.0.0_C/APKBUILD'
+  workflow_dispatch:
+
+jobs:
+  compile-c:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - target: aarch64-cortex-a53
+            cross: aarch64-linux-gnu
+          - target: aarch64-cortex-a72
+            cross: aarch64-linux-gnu
+          - target: aarch64-generic
+            cross: aarch64-linux-gnu
+          - target: arm-cortex-a7_neon-vfpv4
+            cross: arm-linux-gnueabihf
+          - target: arm-cortex-a9
+            cross: arm-linux-gnueabihf
+          - target: mips_24kc
+            cross: mips-linux-gnu
+          - target: mipsel_24kc
+            cross: mipsel-linux-gnu
+          - target: x86_64
+            cross: x86_64-linux-gnu
+          - target: riscv64-generic
+            cross: riscv64-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-${{ matrix.arch.cross }}
+
+      - name: Compile all C binaries for ${{ matrix.arch.target }}
+        run: |
+          cd build_1.0.0_C/C
+          for dir in wg-*/; do
+            name=$(basename "$dir")
+            cd "$name"
+            ${{ matrix.arch.cross }}-gcc -Wall -O2 -static -o "$name" "${name}.c"
+            cd ..
+          done
+
+      - name: Upload binaries for ${{ matrix.arch.target }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch.target }}
+          path: build_1.0.0_C/C/*/wg-*
+          retention-days: 1
+
+  build-apk:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    needs: compile-c
+    strategy:
+      matrix:
+        arch:
+          - target: aarch64-cortex-a53
+          - target: aarch64-cortex-a72
+          - target: aarch64-generic
+          - target: arm-cortex-a7_neon-vfpv4
+          - target: arm-cortex-a9
+          - target: mips_24kc
+          - target: mipsel_24kc
+          - target: x86_64
+          - target: riscv64-generic
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binaries for ${{ matrix.arch.target }}
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch.target }}
+          path: build_1.0.0_C/C/
+
+      - name: Setup APK build environment
+        run: apk add --no-cache alpine-sdk abuild
+
+      - name: Setup signing keys
+        run: |
+          mkdir -p ~/.abuild
+          echo "${{ secrets.RSA_PRIVATE_KEY }}" > ~/.abuild/wg-autoconf.rsa
+          echo "${{ secrets.RSA_PUBLIC_KEY }}" > ~/.abuild/wg-autoconf.rsa.pub
+          cp ~/.abuild/wg-autoconf.rsa.pub /etc/apk/keys/
+          chmod 600 ~/.abuild/wg-autoconf.rsa
+          chmod 644 ~/.abuild/wg-autoconf.rsa.pub
+          printf 'PACKAGER_PRIVKEY=%s/.abuild/wg-autoconf.rsa\nPACKAGER="Alexander Gomez <alexandrglm@proton.me>"\n' "$HOME" > ~/.abuild/abuild.conf
+
+      - name: Build APK for ${{ matrix.arch.target }}
+        run: |
+          cd build_1.0.0_C
+          tar czf source.tar.gz source/
+          abuild -F checksum
+          abuild -F -r
+
+      - name: Get version
+        id: get_version
+        run: |
+          cd build_1.0.0_C
+          VERSION=$(grep "^pkgver=" APKBUILD | cut -d= -f2 | tr -d '"')
+          REL=$(grep "^pkgrel=" APKBUILD | cut -d= -f2 | tr -d '"')
+          echo "VERSION=${VERSION}-r${REL}" >> $GITHUB_OUTPUT
+
+      - name: Upload APK artifact for ${{ matrix.arch.target }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.arch.target }}
+          path: /github/home/packages/**/*.apk
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build-apk
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all APKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apk-*
+          path: ./apks
+          merge-multiple: true
+
+      - name: Get version
+        id: get_version
+        run: |
+          cd build_1.0.0_C
+          VERSION=$(grep "^pkgver=" APKBUILD | cut -d= -f2 | tr -d '"')
+          REL=$(grep "^pkgrel=" APKBUILD | cut -d= -f2 | tr -d '"')
+          echo "VERSION=${VERSION}-r${REL}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: wg-autoconf v${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## wg-autoconf v${{ steps.get_version.outputs.VERSION }}
+
+            Multi-arch release supporting:
+            - aarch64 (cortex-a53, cortex-a72, generic)
+            - arm (cortex-a7_neon-vfpv4, cortex-a9)
+            - mips_24kc (big endian)
+            - mipsel_24kc (little endian)
+            - x86_64
+            - riscv64_generic
+
+            ### Installation
+            ```bash
+            # Add public key
+            wget -O /etc/apk/keys/wg-autoconf.rsa.pub https://github.com/alexandrglm/openwrt_wg-autoconf/releases/download/v${{ steps.get_version.outputs.VERSION }}/wg-autoconf.rsa.pub
+
+            # Install APK for your architecture
+            apk add wg-autoconf-${{ steps.get_version.outputs.VERSION }}.apk
+
+
+            ### CHANGELOG
+
+            - [X] - **Migrate most expensive functions to C (1000x literally performance increase)**
+                - [X] `validate_wg_config()` > `wg-validator.c`
+                - [X] `get_conf_value()` > `wg-get_conf_value.c`
+                - [X] `setup_wireguard()` + `remove_wireguard()` > `wg-setup.c`
+                - [X] `activate_interface()` + `deactivate_interface()` > `wg-interface.c`
+                - [X] `set_lan_routes()` + `unset_lan_routes()` > `wg-route.c`
+
+            - [X] **Fix DNS redirect DNAT** on `routes set` / cleanup on `routes unset`
+                - Now, the "DNS issue" is fixed, the user should be noticed in logs/warns
+        files: |
+            ./apks/*.apk
+            ~/.abuild/wg-autoconf.rsa.pub
+            prerelease: false
+            draft: false
+
+

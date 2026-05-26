@@ -1,0 +1,4 @@
+#!/bin/ash
+# 1.0.0-r1 pre-deinstall
+/usr/libexec/wg-autoconf/scripts/wg-autoconf_prerm.sh
+exit 0

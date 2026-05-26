@@ -1,0 +1,171 @@
+#!/usr/bin/env ash
+# lib/chandler.sh: wg-autoconf C Handler
+
+WG_LIBEXEC="/usr/libexec/wg-autoconf"
+C_BIN_DIR="${WG_LIBEXEC}/lib"
+
+# A)    BINS
+
+# 1.wg-validate_wg_config
+HAS_WG_VALIDATOR="no"
+WG_VALIDATOR_BIN="${C_BIN_DIR}/wg-validator"
+if [ -f "$WG_VALIDATOR_BIN" ] && [ -x "$WG_VALIDATOR_BIN" ]; then
+    HAS_WG_VALIDATOR="yes"
+fi
+
+# 2. wg-get_conf_value
+HAS_WG_GET_CONF_VALUE="no"
+WG_GET_CONF_VALUE_BIN="${C_BIN_DIR}/wg-get_conf_value"
+if [ -f "$WG_GET_CONF_VALUE_BIN" ] && [ -x "$WG_GET_CONF_VALUE_BIN" ]; then
+    HAS_WG_GET_CONF_VALUE="yes"
+fi
+
+# 3. wg-route (set_lan_routes / unset_lan_routes)
+HAS_WG_ROUTE_MANAGER="no"
+WG_ROUTE_MANAGER_BIN="${C_BIN_DIR}/wg-route"
+if [ -f "$WG_ROUTE_MANAGER_BIN" ] && [ -x "$WG_ROUTE_MANAGER_BIN" ]; then
+    HAS_WG_ROUTE_MANAGER="yes"
+fi
+
+# 4. wg-interface (activate_interface / deactivate_interface)
+HAS_WG_INTERFACE_MANAGER="no"
+WG_INTERFACE_MANAGER_BIN="${C_BIN_DIR}/wg-interface"
+if [ -f "$WG_INTERFACE_MANAGER_BIN" ] && [ -x "$WG_INTERFACE_MANAGER_BIN" ]; then
+    HAS_WG_INTERFACE_MANAGER="yes"
+fi
+
+# 5. wg-setuo (setup_wireguard / remove_wireguard)
+HAS_WG_SETUP_MANAGER="no"
+WG_SETUP_MANAGER_BIN="${C_BIN_DIR}/wg-setup"
+if [ -f "$WG_SETUP_MANAGER_BIN" ] && [ -x "$WG_SETUP_MANAGER_BIN" ]; then
+    HAS_WG_SETUP_MANAGER="yes"
+fi
+
+
+
+# B)    BIN INVOKATIONS (chandler wrapper)  
+
+# 1.wg-validate_wg_config
+wg_c_validate_config() {
+    local context="$1"
+    local config_file="$2"
+    local field="$3"
+    local value="$4"
+    local test_mode="${5:-0}"
+
+    [ "$HAS_WG_VALIDATOR" != "yes" ] && return 1
+
+    local args="validate --type \"$context\" --field \"$field\" --value \"$value\""
+
+    if [ "$test_mode" = "1" ]; then
+        args="$args --test-mode"
+    fi
+
+    if [ -n "$config_file" ] && [ -f "$config_file" ]; then
+        args="$args --config \"$config_file\""
+    fi
+
+    "$WG_VALIDATOR_BIN" $args 2>/dev/null
+    return $?
+}
+
+# 2. wg-get_conf_value
+wg_c_get_conf_value() {
+    local key="$1"
+    local file="$2"
+    local format="${3:-raw}"
+    local direct_value="$4"
+
+    [ "$HAS_WG_GET_CONF_VALUE" != "yes" ] && return 1
+
+    local args="get --key \"$key\" --format \"$format\""
+
+    if [ -n "$direct_value" ]; then
+        args="$args --value \"$direct_value\""
+    elif [ -n "$file" ] && [ -f "$file" ]; then
+        args="$args --file \"$file\""
+    else
+        return 1
+    fi
+
+    "$WG_GET_CONF_VALUE_BIN" $args 2>/dev/null
+    return $?
+}
+
+# 3. wg-route (set_lan_routes / unset_lan_routes)
+wg_c_set_lan_routes() {
+    [ "$HAS_WG_ROUTE_MANAGER" != "yes" ] && return 1
+    "$WG_ROUTE_MANAGER_BIN" set "$1" "$2" 2>/dev/null
+    return $?
+}
+
+wg_c_unset_lan_routes() {
+    [ "$HAS_WG_ROUTE_MANAGER" != "yes" ] && return 1
+    "$WG_ROUTE_MANAGER_BIN" unset "$1" "$2" 2>/dev/null
+    return $?
+}
+
+# 4. wg-interface (activate_interface / deactivate_interface)
+wg_c_activate_interface() {
+    local iface="$1"
+    [ "$HAS_WG_INTERFACE_MANAGER" != "yes" ] && return 1
+    "$WG_INTERFACE_MANAGER_BIN" up "$iface" 2>/dev/null
+    return $?
+}
+
+wg_c_deactivate_interface() {
+    local iface="$1"
+    [ "$HAS_WG_INTERFACE_MANAGER" != "yes" ] && return 1
+    "$WG_INTERFACE_MANAGER_BIN" down "$iface" 2>/dev/null
+    return $?
+}
+
+# Setup Manager
+wg_c_setup_wireguard() {
+    local conf_name="$1"
+    local mode="$2"
+    [ "$HAS_WG_SETUP_MANAGER" != "yes" ] && return 1
+    if [ -n "$mode" ] && [ "$mode" = "manual" ]; then
+        "$WG_SETUP_MANAGER_BIN" setup "$conf_name" "manual" 2>/dev/null
+    else
+        "$WG_SETUP_MANAGER_BIN" setup "$conf_name" 2>/dev/null
+    fi
+    return $?
+}
+
+
+# 5. wg-setuo (setup_wireguard / remove_wireguard)
+wg_c_remove_wireguard() {
+    local iface="$1"
+    local silent="$2"
+    [ "$HAS_WG_SETUP_MANAGER" != "yes" ] && return 1
+    if [ "$silent" = "silent" ]; then
+        "$WG_SETUP_MANAGER_BIN" remove "$iface" "silent" 2>/dev/null
+    else
+        "$WG_SETUP_MANAGER_BIN" remove "$iface" 2>/dev/null
+    fi
+    return $?
+}
+
+
+
+
+# C)    EXPORTS
+
+export HAS_WG_VALIDATOR
+export WG_VALIDATOR_BIN
+
+export HAS_WG_GET_CONF_VALUE
+export WG_GET_CONF_VALUE_BIN
+
+export HAS_WG_ROUTE_MANAGER
+export WG_ROUTE_MANAGER_BIN
+
+export HAS_WG_INTERFACE_MANAGER
+export WG_INTERFACE_MANAGER_BIN
+
+export HAS_WG_SETUP_MANAGER
+export WG_SETUP_MANAGER_BIN
+
+
+export C_BIN_DIR
