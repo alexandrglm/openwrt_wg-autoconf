@@ -1,57 +1,261 @@
-# wg-autoconf 1.0.0-r1 Documentation v1
+# wg-autoconf 1.0.0-r1 Documentation
 
-Complete technical reference for `wg-autoconf`: architecture, internals, design decisions, and troubleshooting.
-
----
-
-## Table of Contents
-
-1. [Architecture Overview](#architecture-overview)
-2. [Execution Lifecyle](#execution-lifecyle)
-3. [State Machine](#state-machine)
-4. [Syntax/Naming Convention](#naming-convention)
-5. [Routing System (Policy-Based)](#routing-system-policy-based)
-6. [WireGuard Server Support](#wireguard-server-support)
-7. [Firewall Integration](#firewall-integration)
-8. [Atomic Operations & Backups](#atomic-operations--backups)
-9. [NFTables Integration](#nftables-integration)
-10. [Boot Cleanup Service](#boot-cleanup-service)
-11. [Multi-Interface Handling](#multi-interface-handling)
-12. [Design Decisions & DEBUG! Notes](#design-decisions--debug-notes)
-13. [Performance Considerations](#performance-considerations)
-14. [Advanced Troubleshooting](#advanced-troubleshooting)
+> Complete technical reference for `wg-autoconf`
 
 ---
 
-## 1.   Architecture Overview
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Execution Lifecycle](#2-execution-lifecycle)
+3. [State Machine](#3-state-machine)
+4. [Syntax and Naming Convention](#4-syntax-and-naming-convention)
+5. [Routing System (Policy-Based)](#5-routing-system-policy-based)
+6. [WireGuard Server Support](#6-wireguard-server-support)
+7. [Firewall Integration](#7-firewall-integration)
+8. [DNS Redirect](#8-dns-redirect)
+9. [NFTables Integration](#9-nftables-integration)
+10. [Atomic Operations and Backups](#10-atomic-operations-and-backups)
+11. [C Optimised Modules](#11-c-optimised-modules)
+12. [Boot Cleanup Service](#12-boot-cleanup-service)
+13. [Multi-Interface Handling](#13-multi-interface-handling)
+14. [Design Decisions and Notes](#14-design-decisions-and-notes)
+15. [Performance Considerations](#15-performance-considerations)
+16. [Troubleshooting](#16-troubleshooting)
+17. [File Locations](#17-file-locations)
+18. [Development Notes](#18-development-notes)
+
+---
+
+## 1. Architecture Overview
 
 ### System Components
+
+
+
+
+`wg-autoconf` is a comprehensive WireGuard management tool for OpenWrt, built with a hybrid architecture combining Ash shell for flexibility and C for performance-critical operations.
+
 
 ![wg-autoconf main components](./DOCS/img/DIAGRAMS/components.png)
 
 
+```mermaid
+graph TB
+    subgraph CLI["CLI Interface (Shell)"]
+        direction LR
+        C1["setup"]
+        C2["up"]
+        C3["routes"]
+        C4["server"]
+        C5["status"]
+    end
 
-### 2.  Execution Lifecycle (Setup -> Activate -> Route)
+    subgraph Core["Core Shell Functions"]
+        direction TB
+        S1["State Manager"]
+        S2["UCI Manager"]
+        S3["Route Manager"]
+        S4["Firewall Manager"]
+        S5["Backup Manager"]
+    end
 
-![](./DOCS/img/DIAGRAMS/ESTADOS_PIPELINE.png)
+    subgraph Optimized["C Optimised Modules"]
+        direction TB
+        O1["wg-validator"]
+        O2["wg-get_conf_value"]
+        O3["wg-interface<br/>(up/down ops)"]
+        O4["wg-route<br/>(route mgmt)"]
+        O5["wg-setup<br/>(setup/rm)"]
+    end
 
-***
+    subgraph System["System Layer"]
+        direction TB
+        SY1["WireGuard"]
+        SY2["UCI"]
+        SY3["nftables"]
+        SY4["ip"]
+        SY5["dnsmasq"]
+    end
 
-##### wg-autoconf setup myconfig
+    CLI --> Core
+    Core --> Optimized
+    Optimized --> System
+
+    classDef cli fill:#4A90D9,color:#fff,stroke:#2C5F8A,stroke-width:2px,rx:8px
+    classDef core fill:#50B7A0,color:#fff,stroke:#2D7A6A,stroke-width:2px,rx:8px
+    classDef opt fill:#E67E22,color:#fff,stroke:#B85E14,stroke-width:2px,rx:8px
+    classDef sys fill:#8E44AD,color:#fff,stroke:#5E3370,stroke-width:2px,rx:8px
+    
+    class C1,C2,C3,C4,C5 cli
+    class S1,S2,S3,S4,S5 core
+    class O1,O2,O3,O4,O5 opt
+    class SY1,SY2,SY3,SY4,SY5 sys
+```
+
+### Core Design Principles
+
+- **Atomic Operations**: Every configuration change is atomic, preventing corruption
+- **State Persistence**: All interface states are tracked across reboots and upgrades
+- **Safety First**: Multiple validation layers and safe fallbacks
+- **Performance**: C modules for critical operations (1000x speed improvement)
+- **Zero Surprises**: Predictable behaviour with extensive logging
+
+---
+
+## 2. Execution Lifecycle
+
+### Pipeline Overview
+
+![](./DOCS/img/DIAGRAMS/DB_MODEL.png)
+
+The lifecycle of a WireGuard interface follows a well-defined pipeline:
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED: setup
+    CREATED --> ACTIVE: up
+    ACTIVE --> ROUTED: routes set
+    ROUTED --> ACTIVE: routes clear
+    ACTIVE --> CREATED: down
+    CREATED --> REMOVED: remove
+    ROUTED --> REMOVED: remove
+    REMOVED --> [*]
+    
+    note right of CREATED
+        State: CREATED
+        Action: setup
+        Interface configured
+        but not active
+    end note
+    
+    note right of ACTIVE
+        State: ACTIVE
+        Action: up
+        WireGuard interface
+        is up and running
+    end note
+    
+    note right of ROUTED
+        State: ROUTED
+        Action: routes set
+        Routing rules
+        are configured
+    end note
+    
+    note right of REMOVED
+        State: REMOVED
+        Action: remove
+        Interface and config
+        are cleaned up
+    end note
+    
+    classDef created fill:#F39C12,color:#fff,stroke:#D68910,stroke-width:2px
+    classDef active fill:#2ECC71,color:#fff,stroke:#1A9C54,stroke-width:2px
+    classDef routed fill:#3498DB,color:#fff,stroke:#1F6F8F,stroke-width:2px
+    classDef removed fill:#E74C3C,color:#fff,stroke:#A93226,stroke-width:2px
+    
+    class CREATED created
+    class ACTIVE active
+    class ROUTED routed
+    class REMOVED removed
+```
+
+### Step 1: `wg-autoconf setup myconfig`
+
 ![](./DOCS/img/DIAGRAMS/setup_myconfig.png)
+
 1. Parse the given `/etc/wireguard/myconfig.conf`
 2. Validate all fields (keys, IPs, endpoints)
 3. Check for collisions
 4. Create interface in UCI (`/etc/config/network`)
 5. Write state: ID_X_NAME=myconfig
 6. Commit
-
 - Result: Interface "wg_myconfig" created but **DOWN**
 
-***
 
-##### wg-autoconf up wg_myconfig
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as wg-autoconf setup
+    participant Parser as Config Parser
+    participant Validator as wg-validator
+    participant State as State Manager
+    participant UCI as UCI Manager
+    participant System as System Layer
+
+    User->>CLI: setup myconfig
+    
+    activate CLI
+    
+    CLI->>Parser: Parse /etc/wireguard/myconfig.conf
+    activate Parser
+    
+    Parser->>Parser: Extract PrivateKey, PublicKey
+    Parser->>Parser: Extract Address, Endpoint
+    Parser->>Parser: Extract AllowedIPs, DNS
+    
+    Parser->>Validator: Validate all fields
+    activate Validator
+    Validator-->>Parser: ✓ Validation passed
+    deactivate Validator
+    
+    Parser-->>CLI: Config parsed successfully
+    deactivate Parser
+    
+    CLI->>System: Check address collisions
+    activate System
+    System-->>CLI: ✓ Address available
+    deactivate System
+    
+    CLI->>System: Check interface name conflicts
+    activate System
+    System-->>CLI: ✓ Name available
+    deactivate System
+    
+    CLI->>UCI: Create network config
+    activate UCI
+    UCI->>System: Add to /etc/config/network
+    Note over UCI,System: # wg-autoconf network start id X
+    UCI-->>CLI: ✓ Network config created
+    deactivate UCI
+    
+    CLI->>UCI: Create DHCP config
+    activate UCI
+    UCI->>System: Add to /etc/config/dhcp
+    Note over UCI,System: # wg-autoconf dhcp start id X
+    UCI-->>CLI: ✓ DHCP config created
+    deactivate UCI
+    
+    CLI->>UCI: Create Firewall config
+    activate UCI
+    UCI->>System: Add to /etc/config/firewall
+    Note over UCI,System: # wg-autoconf firewall start id X
+    UCI-->>CLI: ✓ Firewall config created
+    deactivate UCI
+    
+    CLI->>State: Write state info
+    activate State
+    State->>State: ID_X_NAME=myconfig
+    State->>State: ID_X_IS_CREATED=1
+    State-->>CLI: ✓ State saved
+    deactivate State
+    
+    CLI->>UCI: Commit all changes
+    activate UCI
+    UCI->>System: uci commit
+    UCI-->>CLI: ✓ Changes committed
+    deactivate UCI
+    
+    CLI-->>User: ✓ Interface "wg_myconfig" created (DOWN)
+    deactivate CLI
+    
+    Note over User,System: Result: Interface configured but not active
+```
+
+### Step 2: `wg-autoconf up wg_myconfig`
+
 ![](./DOCS/img/DIAGRAMS/up_wg_iface.png)
+
 1. Read state to get private key
 2. Create WireGuard interface with `ip link add type wireguard`
 3. Set private key with `wg set`
@@ -61,10 +265,85 @@ Complete technical reference for `wg-autoconf`: architecture, internals, design 
 
 - Result: Interface "wg_myconfig" is UP, can ping peer
 
-***
 
-##### wg-autoconf routes set wg_myconfig lan3
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as wg-autoconf up
+    participant State as State Manager
+    participant WG as wg-interface
+    participant IP as ip Command
+    participant System as System Layer
+
+    User->>CLI: up wg_myconfig
+    
+    activate CLI
+    
+    CLI->>State: Read state for wg_myconfig
+    activate State
+    State-->>CLI: ✓ Private key retrieved
+    deactivate State
+    
+    CLI->>WG: Create WireGuard interface
+    activate WG
+    WG->>System: ip link add wg_myconfig type wireguard
+    activate System
+    System-->>WG: ✓ Interface created
+    deactivate System
+    WG-->>CLI: ✓ Interface created
+    deactivate WG
+    
+    CLI->>WG: Set private key
+    activate WG
+    WG->>System: wg set wg_myconfig private-key <key>
+    activate System
+    System-->>WG: ✓ Key set
+    deactivate System
+    WG-->>CLI: ✓ Private key configured
+    deactivate WG
+    
+    CLI->>IP: Assign IP address
+    activate IP
+    IP->>System: ip addr add 10.2.0.2/32 dev wg_myconfig
+    activate System
+    System-->>IP: ✓ IP assigned
+    deactivate System
+    IP-->>CLI: ✓ Address configured
+    deactivate IP
+    
+    CLI->>IP: Bring interface UP
+    activate IP
+    IP->>System: ip link set wg_myconfig up
+    activate System
+    System-->>IP: ✓ Interface UP
+    deactivate System
+    IP-->>CLI: ✓ Interface is UP
+    deactivate IP
+    
+    CLI->>System: Wait for interface to be operational
+    activate System
+    Note over System: Timeout: 2 seconds
+    System-->>CLI: ✓ Interface operational
+    deactivate System
+    
+    CLI->>State: Update state
+    activate State
+    State->>State: ID_X_IS_ACTIVE=1
+    State-->>CLI: ✓ State updated
+    deactivate State
+    
+    CLI-->>User: ✓ Interface "wg_myconfig" is UP
+    
+    deactivate CLI
+    
+    Note over User,System: Result: Interface is UP and operational
+    Note over User,System: Can ping peer at 10.2.0.1
+```
+
+### Step 3: `wg-autoconf routes set wg_myconfig lan3`
+
 ![](./DOCS/img/DIAGRAMS/ROUTES_SET.png)
+
 1. Create routing table: _vpn_wg_myconfig_lan3
 2. Add dynamic IP rules (priority = table_id * 10)
 3. Add routes: subnet → lan3, default → wg_myconfig
@@ -75,58 +354,150 @@ Complete technical reference for `wg-autoconf`: architecture, internals, design 
 
 - Result: All traffic from port3 subnet routes through VPN
 
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as wg-autoconf routes
+    participant State as State Manager
+    participant Route as wg-route
+    participant Firewall as Firewall Manager
+    participant System as System Layer
+    participant NFT as nftables
+
+    User->>CLI: routes set wg_myconfig lan3
+    
+    activate CLI
+    
+    CLI->>System: Get LAN subnet info for lan3
+    activate System
+    System-->>CLI: ✓ IP, netmask, CIDR
+    deactivate System
+    
+    CLI->>Route: Create routing table
+    activate Route
+    Route->>System: /etc/iproute2/rt_tables
+    Note over Route,System: 150 _vpn_wg_myconfig_lan3
+    System-->>Route: ✓ Table created
+    Route-->>CLI: ✓ Routing table created
+    deactivate Route
+    
+    CLI->>Route: Add dynamic IP rules
+    activate Route
+    Note over Route: Priority = table_id * 10
+    Route->>System: 1500: from SUBNET to SUBNET lookup main
+    Route->>System: 1501: from SUBNET lookup TABLE
+    Route->>System: 1503: from all to SUBNET lookup TABLE
+    System-->>Route: ✓ Rules added
+    Route-->>CLI: ✓ IP rules configured
+    deactivate Route
+    
+    CLI->>Route: Add routes
+    activate Route
+    Route->>System: SUBNET dev lan3 table TABLE
+    Route->>System: default dev wg_myconfig table TABLE
+    System-->>Route: ✓ Routes added
+    Route-->>CLI: ✓ Routes configured
+    deactivate Route
+    
+    CLI->>Firewall: Create firewall zone
+    activate Firewall
+    Firewall->>System: Zone: wg_myconfig
+    Firewall->>System: Forward: lan3 -> wg_myconfig
+    Firewall->>System: Forward: wg_myconfig -> lan3
+    System-->>Firewall: ✓ Zone configured
+    Firewall-->>CLI: ✓ Firewall zone created
+    deactivate Firewall
+    
+    CLI->>Firewall: Add DNS redirect
+    activate Firewall
+    Firewall->>System: DNAT: port3:53 -> tunnel_dns:53
+    System-->>Firewall: ✓ DNS redirect added
+    Firewall-->>CLI: ✓ DNS redirection configured
+    deactivate Firewall
+    
+    CLI->>Firewall: Reload firewall
+    activate Firewall
+    Firewall->>NFT: Trigger nftables rebuild
+    activate NFT
+    NFT-->>Firewall: ✓ Firewall reloaded
+    deactivate NFT
+    Firewall-->>CLI: ✓ Firewall reloaded
+    deactivate Firewall
+    
+    CLI->>NFT: Re-apply nftables rules
+    activate NFT
+    Note over NFT: Critical workaround
+    Note over NFT: Multi-interface detection
+    NFT-->>CLI: ✓ Rules re-applied
+    deactivate NFT
+    
+    CLI->>State: Update state
+    activate State
+    State->>State: ID_X_IS_RT_TABLES_IN_USE=1
+    State-->>CLI: ✓ State updated
+    deactivate State
+    
+    CLI-->>User: ✓ All traffic from port3 routes through VPN
+    
+    deactivate CLI
+    
+    Note over User,NFT: Result: All traffic from lan3 is routed through VPN tunnel
+
+```
+
 ---
 
-## 3.   State Machine
+## 3. State Machine
 
 ### Purpose
 
-Persistent storage to offload responsibilities of 'noticing the users'/actions in the .apk's own lifecycles. The binary itself takes care of its 'self-care' via an state machine where, in each operation, verifies the required states before performing it, and proceeds by adjusting states as needed.
+Persistent storage that tracks the complete state of all WireGuard interfaces. The state machine enables:
+
+- **Self-healing**: The tool knows exactly what state each interface should be in
+- **Safe operations**: Prevents dangerous actions on interfaces in wrong states
+- **Upgrade safety**: Tracks state across package upgrades
+- **Disaster recovery**: Can recover from crashes and interrupted operations
 
 ![wg-autoconf State Machine, states per operations](./DOCS/img/DIAGRAMS/STATE_MACHINE.png)
 
-Through the machine's keys and values, zero-failures zero-risk usage is ensured by testing against nearly all possible error scenarios to prevent disaster (*'Keep everything simple but safe', avoids hard-resets, allows to recover/self-heal before disaster may occur)"
 
-### Format
-
-Key-value pairs, one per line:
-
-```
-# Metadata
-ID_1_NAME=myconfig
-ID_1_CREATED=1708457600
-ID_1_CONF_NAME=myconfig
-
-# Configuration
-ID_1_PRIVKEY=uEcbqUV3DpqVgoE...
-ID_1_PUBKEY=X9DFBhm20MXz/f6H...
-ID_1_ADDRESS=10.2.0.2/32
-ID_1_ENDPOINT=vpn.example.com:51820
-ID_1_PORT=51820
-
-# State
-ID_1_IS_CREATED=1
-ID_1_IS_ACTIVE=0
-ID_1_IS_RT_TABLES_IN_USE=0
-
-# Backup references
-ID_1_BACKUP_NETWORK=network.BACKUP_PRE_WIREGUARD_ID_1
-ID_1_BACKUP_FIREWALL=firewall.BACKUP_PRE_WIREGUARD_ID_1
-```
-
-### File Location
+### State File Location
 
 ```
 /usr/libexec/wg-autoconf/states
 ```
 
-### Read/Write Operations
+### State File Format
+
+Key-value pairs, one per line:
+
+```bash
+# Global States
+IS_INSTALLED=1              # Package installed
+IS_FIRST_EXEC=1             # First execution after install/nuke
+IS_PREV_TO_UPGRADE=0        # Pre-upgrade state flag
+IS_UPGRADED=0               # Post-upgrade state flag
+
+# Per-Interface States
+ID_1_NAME=wg_home           # Interface name
+ID_1_IS_CREATED=1           # Config created in UCI
+ID_1_IS_ACTIVE=1             # Interface is up/running
+ID_1_IS_RT_TABLES_IN_USE=1  # Routing tables configured
+
+ID_2_NAME=wg_work
+ID_2_IS_CREATED=1
+ID_2_IS_ACTIVE=0
+ID_2_IS_RT_TABLES_IN_USE=0
+```
+
+### State Operations
 
 ```bash
 # Write (creates or updates)
-state_write "ID_1_NAME" "myconfig"
+state_write "ID_1_NAME" "wg_home"
 
-# Read
+# Read value
 value=$(state_read "ID_1_NAME")
 
 # Check existence
@@ -135,280 +506,243 @@ if state_read "ID_1_NAME" >/dev/null 2>&1; then
 fi
 
 # Get interface ID from name
-id=$(state_get_id "myconfig")
+id=$(state_get_id "wg_home")
 
-# List all interface names
-state_list_ifaces  
-# Returns: "1:myconfig 2:othervpn"
+# List all interfaces
+state_list_ifaces
+# Returns: "1:wg_home 2:wg_work"
+
+# Count interfaces
+state_count_ifaces
+# Returns: 2
+
+# Remove interface from state
+state_remove_iface "1"
+
+# Reset entire state (nuke)
+state_reset
 ```
-
----
 
 ### Atomic File Operations
 
-#### WHY ATOMIC: Prevents corruption if write fails mid-operation
-
 ```bash
-
 state_write() {
-
     # 1. Create unique temp file (uses atomic counter)
     temp_file="${ATOMIC_PATHS}/states.write.${counter}.atomic"
-    
+
     # 2. Read entire state file
     # 3. Find key and replace OR append
     # 4. Write to temp
-    
+
     # 5. Verify temp is not empty (critical!)
     if [ ! -s "$temp_file" ]; then
-
-        # Temp empty = write failed, return error
+        # Temp empty = write failed
         return 1
-    
     fi
-    
+
     # 6. Atomic move (mv is atomic on same filesystem)
     mv "$temp_file" "$STATE_FILE"
 }
 ```
 
-**Decision:** While many file operations (as `sed`, `awk`) use to be 'atomics by default', a three-stages approach (read each write reads entire file, modifies in memory, writes atomically) prevents partial writes or corruption.
+**Why Atomic?** Prevents corruption if write fails mid-operation (power loss, interrupt).  While many file operations (as `sed`, `awk`) use to be 'atomics by default', a three-stages approach (read each write reads entire file, modifies in memory, writes atomically) prevents partial writes or corruption.
 
 ---
 
-# 4.    Naming Convention
+## 4. Syntax and Naming Convention
 
-`wg-autoconf` pretends to use a high level and hard syntax for any usage, but nothing quite the opposite.
+### Design Principles
 
-The syntax aims to be mnemonic and related to the binaries it uses. A simple, consistent naming convention across all components to ensure clarity, avoid conflicts, and enable dynamic management.
+- **One name to rule them all**: The interface name (`wg_*`) is the only identifier the user needs
+- **Derived naming**: All other names derive automatically from the interface name
+- **No device names**: Works with interface names, not low-level device names
+- **Predictable patterns**: Easy scripting and debugging
+- **Collision avoidance**: Prefixes (`_vpn_`) and suffixes prevent conflicts
+- **Self-documenting**: Names describe their purpose
 
+### Interface Names
 
-## By Design
+| Mode | Format | Examples |
+|---|---|---|
+| Setup (Auto) | `wg_<conf_filename>` | `wg_home`, `wg_work` |
+| Manual | `wg<any_name>` | `wg0`, `wgVPN1` |
+| Server | `wg_server_<name>` | `wg_server_myvpn` |
 
-1. **One name to rule them all:** The interface name (`wg_*`) is the only identifier the user needs to remember
-2. **Derived naming:** All other names (peers, tables, zones, state files) derive automatically from the interface name
-3. **No device names:** We work with interface names, not low-level device names
-4. **Predictable patterns:** Names follow predictable patterns for easy scripting and debugging
-5. **Collision avoidance:** Prefixes (`_vpn_`) and suffixes (`_portX`) prevent conflicts with system resources
-6. **Self-documenting:** Names describe their purpose (e.g., `_vpn_wg_home_port3` clearly means "VPN routing for wg_home on port3")
+**Rules:**
 
-This convention ensures that even with multiple tunnels and complex routing configurations, everything remains organised, discoverable, and manageable (and scalable, maintainable) through wg-autoconf's flow.
+- Lowercase, alphanumeric, underscores allowed
+- No hyphens (not allowed by WireGuard)
+- Must start with `wg`
+- Cannot be just `wg`
+- Max 15 characters
 
----
-
-#### Interface Names
-
-#### For SETUP (Auto Mode)
-**UNDERSCORED**:  
-```
-wg_<conf filename>
-```
-#### For MANUAL
-**NOT UNDERSCORED**:
-```
-wg<any name>
-```
-#### For SERVERS
-```
-wg_server_<any name>
-``` 
-
-- **Identifier:** Lowercase, alphanumeric, underscores allowed (**no hyphens allowed by WireGuard design!**)
-
-- **Examples:** `wg_home`, `wg0`, `wg_server_yupi`, `wg_telegram`
-
-The **interface** name is **the single source of truth**: **everything else derives from it**.
-
----
-
-## Peer Names
+### Derived Names
 
 ```
-<interface>_<peer_identifier>
+Interface:    wg_home
+Interface ID: 1
+
+Routing Table: _vpn_wg_home_port3
+Firewall Zone: wg_home
+UCI Section:   network.wg_home
+Peer Config:   wg_home_peer
+Peer Name:     wg_home_phone
 ```
 
-- **Format:** Interface name + underscore + peer identifier
-- **Peer identifier:** Usually based on peer description or public key suffix
-- **Examples:**
-  - `wg_home_phone`
-  - `wg_server_yupi_yeye`
-  - `wg_work_laptop`
-
----
-
-## Routing Tables
+### Routing Tables
 
 ```
 _vpn_<interface>_<lan_interface>
 ```
 
-- **Format:** `_vpn_` prefix + interface name + LAN interface
-- **Examples:**
-  - `_vpn_wg_home_port3`
-  - `_vpn_wg_server_yupi_lan4`
-  - `_vpn_wg_work_br_lan`
+Examples:
 
----
+- `_vpn_wg_home_port3`
+- `_vpn_wg_work_br-lan`
+- `_vpn_wg_server_myvpn_lan4`
 
-## IP Rule Priorities
+### IP Rule Priorities
 
 ```
-<table_id> x10
+<table_id> × 10
 ```
 
-- **Format:** Table ID multiplied by 10
-- **Example:** Table ID 100 -> priority 1000
-- **Reasoning:** Leaves gaps for manual rules (1001, 1002, etc.)
+Example: Table ID 150 → priority 1500
 
----
+Rule Priorities:
 
-## Firewall Zones
+- **base**: Local traffic (SUBNET → SUBNET)
+- **base+1**: Outbound traffic (SUBNET → TABLE)
+- **base+3**: Return traffic (all → SUBNET)
+
+### Firewall Zones
 
 ```
 wg_<interface>
 ```
 
-- **Format:** Same as interface name
-- **Examples:** `wg_home`, `wg_server_yupi`
-- **Note:** Zones automatically created when routing is enabled
+Examples:
+
+- `wg_home`
+- `wg_work`
+- `wg_server_myvpn`
 
 ---
 
-## State Files
-
-```
-/etc/wg-autoconf/state/<interface>.state
-```
-
-- **Format:** Interface name + `.state` extension
-- **Content:** JSON-like key-value pairs
-- **Examples:**
-  - `wg_home.state`
-  - `wg_server_yupi.state`
-
----
-
-## Backup Files
-
-```
-wg-autoconf_<interface>_<timestamp>.backup
-```
-
-- **Format:** `wg-autoconf_` + interface + timestamp + `.backup`
-- **Timestamp:** YYYYMMDD_HHMMSS
-- **Example:** `wg-autoconf_wg_home_20250222_143015.backup`
-
----
-
-
-
----
-
-## 5.   Routing System (Policy-Based)
+## 5. Routing System (Policy-Based)
 
 ### Why Policy-Based Routing?
 
-Not full tunnel. Selective routing per LAN.  
+Not full tunnel. Selective routing per LAN. You can:
 
-In fact, each tunnel created is not even routed directly to the OpenWRT LAN bridge itself.
+- Route specific LANs through VPN, keep others on WAN
+- Route multiple LANs through different VPNs
+- Dynamically add/remove routes without affecting other traffic
+- Route `wg1` to `lan4`, unroute it, route it to `lan2`
+- Route `wg3` to `lan4` and also to `lan1`
 
-Once you have an active interface, its operation can be tested:
+```mermaid
+graph TB
+    subgraph Before["Before Routing"]
+        direction LR
+        LAN3_B["LAN3"] --> WAN_B["Default WAN<br/>192.168.1.1"]
+        WAN_B --> Internet_B["Internet"]
+    end
 
-```bash
- $ traceroute -i wg_myconf openwrt.org
+    subgraph After["After wg-autoconf routes set wg0 lan3"]
+        direction LR
+        LAN3_A["LAN3"] --> VPN_GW["wg0 (VPN GW)<br/>10.2.0.2"]
+        VPN_GW --> VPN_Server["VPN Server"]
+        
+        LAN1_A["LAN1"] --> WAN_A["Default WAN<br/>192.168.1.1"]
+        WAN_A --> Internet_A["Internet"]
+    end
 
- $ curl --interface wg_myconf ifconfig.me
+    Before --> After
 
- $ ping -I wg_mytest 1.1.1.1
- 
- $ wg-autoconf status
+    classDef before fill:#E74C3C,color:#fff,stroke:#A93226,stroke-width:2px,rx:8px
+    classDef after fill:#2ECC71,color:#fff,stroke:#1A9C54,stroke-width:2px,rx:8px
+    classDef normal fill:#3498DB,color:#fff,stroke:#1F6F8F,stroke-width:2px,rx:8px
+    
+    class LAN3_B,WAN_B,Internet_B before
+    class LAN3_A,VPN_GW,VPN_Server after
+    class LAN1_A,WAN_A,Internet_A normal
 ```
-
-
-From there, you can 'assign' an exit to an interface directly. It is preferef to work with a unified name for everything (wg-autoconf handles the rest), only using an INTERFACE name (not device name) will work.
-
-You can route `wg1` to `lan4`, unroute it and route it again to `lan2`, route another different WG interface `wg3` to `lan4` and also to lan1... You can move routes dynamically in a simple way."
-
-```
-Without routing:
-  ┌─────┐         ┌──────────────┐         ┌──────────┐
-  │LAN3 │ ────→   │ Default WAN  │ ────→   │ Internet │
-  └─────┘         │192.168.1.1   │         └──────────┘
-                  └──────────────┘
-
-With wg-autoconf routes set wg0 lan3:
-  ┌─────┐         ┌──────────────┐         ┌──────────┐
-  │LAN3 │ ────→   │ wg0 (VPN GW) │ ────→   │ VPN      │
-  └─────┘         │   10.2.0.2   │         │ Server   │
-                  └──────────────┘         └──────────┘
-  
-  ┌─────┐         ┌──────────────┐         ┌──────────┐
-  │LAN1 │ ────→   │ Default WAN  │ ────→   │ Internet │
-  └─────┘         │  192.168.1.1 │         └──────────┘
-                  └──────────────┘ 
-```
-
-  
-### 5.  Dynamic Routing Table ID Allocation
-
-**Challenge:** Multiple WG interfaces need unique routing tables. Table IDs in `/etc/iproute2/rt_tables` must be numeric and unique.  
-
-**Solution:** Used table ID * 10 for IP rule priorities. Prevents collisions and leaves room for return rules (prio+3).  
-
-```bash
-# Example: 3 interfaces with tables 150, 151, 200
-
-Table 150 (first LAN VPN):
-
-  Priority 1500: from 192.168.3.0/24 to 192.168.3.0/24 lookup main
-  Priority 1501: from 192.168.3.0/24 lookup _vpn_wg_myconfig_port3
-  Priority 1503: from all to 192.168.3.0/24 lookup _vpn_wg_myconfig_port3
-
-Table 151 (second LAN VPN):
-
-  Priority 1510: from 192.168.4.0/24 to 192.168.4.0/24 lookup main
-  Priority 1511: from 192.168.4.0/24 lookup _vpn_wg_myconfig_port4
-  Priority 1513: from all to 192.168.4.0/24 lookup _vpn_wg_myconfig_port4
-
-Table 200 (client-side routing for multiple servers):
-
-  Priority 2000: from 10.2.0.2 lookup wg_myconfig
-  Priority 2001: from all to 10.2.0.2 lookup wg_myconfig
-```
-
 
 ### IP Rules Priority System
 
 Each LAN route uses 3 rules:
 
-1. **Local traffic** (priority = base): `from SUBNET to SUBNET lookup main`
-   - Allows devices in subnet to communicate directly
-   
-2. **Outbound traffic** (priority = base+1): `from SUBNET lookup TABLE`
-   - Routes traffic from LAN through VPN
-   
-3. **Return traffic** (prioroty = base+3): `from all to SUBNET lookup TABLE`
-   - Ensures responses go back through same VPN
+```bash
+# Example: Table ID 150 (base priority 1500)
 
+# Rule 1: Local traffic (base)
+from 192.168.3.0/24 to 192.168.3.0/24 lookup main
+# Allows devices in subnet to communicate directly
 
+# Rule 2: Outbound traffic (base+1)
+from 192.168.3.0/24 lookup _vpn_wg_home_port3
+# Routes traffic from LAN through VPN
+
+# Rule 3: Return traffic (base+3)
+from all to 192.168.3.0/24 lookup _vpn_wg_home_port3
+# Ensures responses go back through same VPN
+```
+
+### Dynamic Table ID Allocation
+
+**Challenge**: Multiple WG interfaces need unique routing tables. Table IDs must be numeric and unique.
+
+**Solution**: Auto-allocate from 150-249. Table ID × 10 = rule priorities.
+
+```bash
+# Example: 3 interfaces with tables 150, 151, 200
+
+Table 150 (first LAN VPN):
+  Priority 1500: from 192.168.3.0/24 to 192.168.3.0/24 lookup main
+  Priority 1501: from 192.168.3.0/24 lookup _vpn_wg_home_port3
+  Priority 1503: from all to 192.168.3.0/24 lookup _vpn_wg_home_port3
+
+Table 151 (second LAN VPN):
+  Priority 1510: from 192.168.4.0/24 to 192.168.4.0/24 lookup main
+  Priority 1511: from 192.168.4.0/24 lookup _vpn_wg_work_port4
+  Priority 1513: from all to 192.168.4.0/24 lookup _vpn_wg_work_port4
+
+Table 200 (client-side routing):
+  Priority 2000: from 10.2.0.2 lookup wg_home
+  Priority 2001: from all to 10.2.0.2 lookup wg_home
+```
 
 ### Routing Table Persistence
 
 ```bash
 # Tables stored in /etc/iproute2/rt_tables:
-150 _vpn_wg_myconfig_lan3
-151 _vpn_wg_myconfig_lan4
-200 wg_myconfig
-201 wg_othervpn
+150 _vpn_wg_home_port3
+151 _vpn_wg_work_port4
+200 wg_home
+201 wg_work
+
+# Added on: routes set command
+# Removed on: routes unset or remove commands
+# Cleanup on: Boot cleanup service (if enabled)
 ```
 
-**Added on:** `routes set` command
-**Removed on:** `routes unset` or `remove` commands
-**Cleanup on:** Boot cleanup service (if enabled)
+### Testing VPN Routes
+
+```bash
+# Test VPN connectivity
+traceroute -i wg_home openwrt.org
+curl --interface wg_home ifconfig.me
+ping -I wg_home 1.1.1.1
+
+# Check status
+wg-autoconf status
+wg show wg_home
+```
 
 ---
 
-## 6.   WireGuard Server Support
+## 6. WireGuard Server Support
 
 ### Architecture
 
@@ -421,58 +755,45 @@ wg_server_myserver (10.99.0.0/24)
   ├─→ client2 (10.99.0.3)
   └─→ client3 (10.99.0.4)
 
-wg_server_anotherServer (10.98.0.0/24)
+wg_server_work (10.98.0.0/24)
   |
   ├─→ emp_user1 (10.98.0.2)
   └─→ emp_user2 (10.98.0.3)
 ```
 
----
-
 ### State Storage
 
-Server metadata in state file:
+Servers use the same state format as normal interfaces:
 
 ```
-SERVER_1_ID=1
-SERVER_1_NAME=myserver
-SERVER_1_SUBNET=10.99.0.0/24
-SERVER_1_DNS=10.99.0.1
-SERVER_1_PRIVKEY=<privkey>
-SERVER_1_PUBKEY=<pubkey>
-SERVER_1_LISTEN_PORT=51820
-SERVER_1_ENDPOINT=develhost.mooo.com
-SERVER_1_NEXT_IP=10.99.0.4
-SERVER_1_USER_COUNT=3
+ID_1_NAME=wg_server_myserver
+ID_1_IS_CREATED=1
+ID_1_IS_ACTIVE=1
+ID_1_IS_RT_TABLES_IN_USE=0
 
-SERVER_1_USER_1_NAME=client1
-SERVER_1_USER_1_IP=10.99.0.2
-SERVER_1_USER_1_PUBKEY=<pubkey>
-SERVER_1_USER_1_PRIVKEY=<privkey>
-SERVER_1_USER_1_CREATED=1708457600
-SERVER_1_USER_1_LAST_HS=1708457650
-SERVER_1_USER_1_BYTES_RX=102400
-SERVER_1_USER_1_BYTES_TX=51200
+# Server-specific metadata stored in separate config
+# /usr/libexec/wg-autoconf/configs/myserver/server.conf
 ```
 
-### Workflow
+### Server Workflow
 
 ```bash
 # 1. CREATE SERVER (interactive)
 wg-autoconf server create
     # Asks: name, subnet, DNS, port, endpoint
-    # Generates: server keypair + state entries
+    # Generates: server keypair
     # Creates: UCI interface + firewall zone
+    # Creates: /usr/libexec/wg-autoconf/configs/<name>/server.conf
 
 # 2. ADD USER
 wg-autoconf server add myserver client1
     # Generates: client keypair
     # Assigns: next available IP (10.99.0.2)
     # Adds peer to WireGuard (via wg set)
-    # Generates: .conf file in /usr/libexec/wg-autoconf/configs/myserver/client1.conf
+    # Generates: /usr/libexec/wg-autoconf/configs/myserver/client1.conf
 
 # 3. DISTRIBUTE CONFIG
-    # User imports .conf to WireGuard app on device
+    # User imports .conf to WireGuard app
     # Device connects → handshake with server
 
 # 4. REVOKE USER (with confirmation)
@@ -486,223 +807,173 @@ wg-autoconf server remove myserver
     # Revokes all users
     # Removes UCI interface + firewall zone
     # Cleans state entirely
+    # Deletes /usr/libexec/wg-autoconf/configs/myserver/
 ```
 
-### Server Manager Design Decisions
+### Design Decisions
 
-* **Single WireGuard per Server:** Each server is isolated, not combined into one interface:
-    - Independent firewall zones
-    - Ability to have different listen ports
-    - Cleaner address space management
-    - Easier debugging per server
-
-* **Auto IP Assignment:** NEXT_IP tracked in state, auto-incremented.  
-    - No manual IP coordination needed
-    - Prevents IP collisions
-    - Simple UX-UI (user just picks a name)
-
-* **Stored Private Keys:** Both server and client privkeys kept in state file:
-    - Can regenerate .conf files if lost
-    - Client reconfiguration without re-running setup
-    - Export configs later
-
-* **Endpoint in State:** Server endpoint (hostname/IP) stored separately:
-    - Can be different from server name
-    - Supports DNS names (e.g., develhost.mooo.com)
-    - Clients get correct endpoint even if renamed
+| Decision | Reason |
+|---|---|
+| Single WireGuard per Server | Independent firewall zones, different listen ports, cleaner address space |
+| Auto IP Assignment | No manual coordination, prevents collisions, simple UX |
+| Stored Private Keys | Can regenerate `.conf` files, client reconfiguration without re-running setup |
+| Endpoint in State | Supports DNS names, different from server name |
+| Per-Server Config Directory | Isolated configurations per server |
 
 ---
 
-## 7.   Firewall Integration
+## 7. Firewall Integration
 
 ### Zone Creation
 
-```bash
-# When: routes set wg0 lan3
-# Creates in /etc/config/firewall:
+When `routes set wg0 lan3` is called, creates in `/etc/config/firewall`:
 
-config zone 'zone_server_myserver'
-    option name 'wg_server_myserver'
-    option network 'wg_server_myserver'
+```bash
+config zone
+    option name 'wg_home'
     option input 'ACCEPT'
     option output 'ACCEPT'
     option forward 'ACCEPT'
     option masq '1'
+    option mtu_fix '1'
+    list network 'wg_home'
 
-config rule 'allow_wg_server_myserver'
-    option name 'Allow-WireGuard-myserver'
+config rule
+    option name 'Allow-WireGuard-wg_home'
     option src 'wan'
     option dest_port '51820'
     option proto 'udp'
     option target 'ACCEPT'
 
-config forwarding 'fwd_wg_server_myserver_to_wan'
-    option src 'wg_server_myserver'
-    option dest 'wan'
+config forwarding
+    option src 'lan3'
+    option dest 'wg_home'
+
+config forwarding
+    option src 'wg_home'
+    option dest 'lan3'
 ```
 
 ### Why Bidirectional Forwarding?
 
 ```bash
+# Rule 1: Allows packets from LAN3 to enter VPN (outbound)
 config forwarding
     option src 'lan3'
-    option dest 'wg_myconfig'
+    option dest 'wg_home'
 
+# Rule 2: Allows responses from VPN back to LAN3 (inbound)
 config forwarding
-    option src 'wg_myconfig'
+    option src 'wg_home'
     option dest 'lan3'
 ```
 
-1.  **First rule:** Allows packets from LAN3 to enter VPN (outbound)
-2.   **Second rule:** Allows responses from VPN back to LAN3 (inbound)
+Both required for bidirectional communication, even in a "default INPUT/FORWARD DROP/REJECT" scenario.
 
-Both required for bidirectional communication, even in a "defaults INPUT/FORWARD DROP/REJECT" scenario.
+### Firewall Tagging
 
+All firewall modifications are wrapped in tagged blocks for safe removal:
 
-### NFTables Integration
-
-wg-autoconf uses OpenWrt's native nftables include system for all custom firewall rules. Instead of adding rules directly with `nft add rule` (which would be lost on firewall reload), all the post-routing needed rules are written as persistent files in `/usr/share/nftables.d/`.
-
-**Rule Locations:**
-
-- **SNAT/Masquerade rules:** `/usr/share/nftables.d/chain-post/srcnat/95-vpn-<wg_iface>-<lan_iface>.nft`
-- **Forwarding rules:** `/usr/share/nftables.d/chain-post/forward/95-vpn-<wg_iface>-<lan_iface>.nft`
-- **Base accept rules:** `/usr/share/nftables.d/chain-post/input/90-wg-<wg_iface>.nft`
-
-**How It Works:**
-
-1. When `routes set` is called, wg-autoconf creates a file with the masquerade rule
-2. When firewall reloads, `fw4` automatically includes all `.nft` files from these directories
-3. Rules persist across reboots and firewall reloads
-4. When `routes unset` is called, the file is deleted
-
-**Example generated file:**
-```nft
-meta oifname "wg_us-vpn" masquerade
-```
-
----
-
-## 8.   Atomic Operations & Backups
-
-### Why Atomic?
-
-Prevents corrupted configs if operation fails mid-way (e.g., power loss, user interrupt).
-
-```
-Without atomic ops:
-
-  wg-autoconf up wg0
-    > Create interface
-    > Set private key  <---- POWER LOSS HERE
-    
-        > [Never reaches] Set IP address
-        > [Never reaches] Activate
-  
-  Result: Broken state, partial config in /etc/config/
-
-With atomic ops:
-  
-  wg-autoconf up wg0
-    > Create temp /etc/config/network.tmp
-    > Read current /etc/config/network
-    > Modify in memory
-    > Write all at once to .tmp
-    < Verify .tmp not empty
-    > Atomic rename .tmp --> network (single OS call)
-    > If any step fails, .tmp deleted, original untouched
-```
-
-### Tagging in-use blocks for /etc/config/ files
-
-Each modification wrapped in comments:
-
-```ini
-# wg-autoconf network start id 1
-config interface 'wg_myconfig'
-    option proto 'wireguard'
+```bash
+# wg-autoconf firewall start id 1
+config zone
+    option name 'wg_home'
     ...
-    option private_key 'eMD4...'
-# wg-autoconf network end id 1
+
+config forwarding
+    option src 'lan3'
+    option dest 'wg_home'
+# wg-autoconf firewall end id 1
 ```
 
-- Surgical removal (only tagged blocks deleted)
-- Multiple simultaneous setups (unique IDs per config)
-- Manual edits survive cleanup
-- Emergency recovery: `grep "wg-autoconf" /etc/config/*`
-
-
-
-### Backup Files
-
-```bash
-# Before first modification to /etc/config/network:
-/etc/config/network.BACKUP_PRE_WIREGUARD_ID_1
-
-# Before first modification to /etc/config/firewall:
-/etc/config/firewall.BACKUP_PRE_WIREGUARD_ID_1
-```
-
-**Naming:** `<config>.BACKUP_PRE_WIREGUARD_ID_<interface_id>`
-
-**Content:** Original file + markers:
-
-```
-#  BACKUP START TAG wg-autoconf backup id X
-original file contents...
-#  BACKUP END wg-autoconf backup id X
-
-# CHECKSUM: <sha256sum> value for THE CONTENT (not the file)
-```
-
-**Checksum:** Validates on restore. Notice the user if mistmatches occur. Retain validation-failed configs for evaluation (to avoid the disaster).
-
-```bash
-# To restore:
-wg-autoconf backups restore
-# → Finds latest BACKUP_PRE_WIREGUARD files
-# → Removes markers
-# → Restores to original location
-```
-
+This allows surgical removal without affecting manual firewall rules.
 
 ---
 
-## 9.   NFTables Integration
+## 8. DNS Redirect
+
+### Overview
+
+When routing is configured, `wg-autoconf` automatically adds DNAT rules to redirect DNS queries from the LAN to the VPN's DNS server.
+
+### Implementation
+
+```bash
+# Example rule added to /etc/config/firewall:
+config redirect
+    option name 'Redirect_DNS_lan3_to_wg_home'
+    option src 'lan3'
+    option proto 'tcp udp'
+    option src_dport '53'
+    option dest_ip '10.2.0.1'
+    option dest_port '53'
+    option target 'DNAT'
+```
+
+### Benefits
+
+- **Prevents DNS Leaks**: All DNS queries go through VPN tunnel
+- **Automatic Configuration**: No manual DNS setup needed
+- **Interface Specific**: Only affects routed LANs
+- **Clean Removal**: Removed when `routes unset` is called
+
+### Removal
+
+When `routes unset` is called, the DNS redirect rule is automatically removed:
+
+```bash
+# The redirect rule is removed atomically with other cleanup
+wg-autoconf routes unset wg_home lan3
+# Removes: DNS redirect, routing table, firewall rules, IP rules
+```
+
+### DNS Leakage Notice
+
+`wg-autoconf` includes a DNS leakage warning system:
+
+```bash
+# When setting up, warns about potential DNS issues
+wg-autoconf setup myvpn
+# > [WARNING] DNS Security Note about '1.1.1.1, 1.0.0.1'
+# > POTENTIAL DNS LEAK DETECTED
+# > You're using your local VPN IP as DNS server
+```
+
+---
+
+## 9. NFTables Integration
 
 ### The Challenge
 
-OpenWrt uses NFTables for firewall. When you reload firewall config, it:
-    1. Reads all `/etc/config/firewall` rules
-    2. Generates new nftables ruleset
-    3. **Clears all existing nftables chains**
-    4. Applies new ruleset
+OpenWrt uses NFTables for firewall. When you reload firewall config:
 
-Problem: Custom rules added by wg-autoconf are lost.
+1. Reads all `/etc/config/firewall` rules
+2. Generates new nftables ruleset
+3. Clears all existing nftables chains
+4. Applies new ruleset
 
-### The Previous Steps (before edging nft.d files as the best solution)
-As explained before, changes made on commit "1.0.0-r1 Session 13.:
-- Re-apply nftables rules after firewall reload
+**Problem**: Custom rules added by `wg-autoconf` are lost.
+
+### The Solution
+
+After every firewall reload, `wg-autoconf` re-applies all necessary nftables rules using the `fw_reload_with_wg_detection()` function:
 
 ```bash
 # In set_lan_routes() and fw_reload_with_wg_detection():
-
-# 13. WORKAROUND NFTABLES
 for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables | awk '{print $2}'); do
-    
-    # 13.1  Re-add accept rules
+
+    # Re-add accept rules
     nft add rule inet fw4 "accept_from_$wg_iface_loop" counter accept 2>/dev/null
     nft add rule inet fw4 "accept_to_$wg_iface_loop" counter accept 2>/dev/null
-    
-    # 13.2 Re-add srcnat jump (critical for masquerading)
+
+    # Re-add srcnat jump (critical for masquerading)
     nft add rule inet fw4 srcnat oifname "$wg_iface_loop" jump "srcnat_${wg_iface_loop}" 2>/dev/null
 done
 ```
 
-
 ### Multi-Interface Detection
 
-**Critical for multiple WG clients + servers:**
+Critical for multiple WG clients + servers:
 
 ```bash
 # Detect from rt_tables (server interfaces)
@@ -715,53 +986,228 @@ ip link show | grep '^[0-9]*:.*wg'
 all_wg_interfaces=$(...)
 ```
 
-**Why both sources?** 
+Why both sources?
+
 - `rt_tables` has all server tables
 - `ip link` shows only active interfaces
 - Combining ensures no missed interfaces
 
+---
+
+## 10. Atomic Operations and Backups
+
+### Why Atomic?
+
+Prevents corrupted configs if operation fails mid-way (power loss, user interrupt).
+
+```
+Without atomic ops:
+  wg-autoconf up wg0
+    > Create interface
+    > Set private key  <---- POWER LOSS HERE
+        > [Never reaches] Set IP address
+        > [Never reaches] Activate
+
+  Result: Broken state, partial config in /etc/config/
+
+With atomic ops:
+  wg-autoconf up wg0
+    > Create temp /etc/config/network.tmp
+    > Read current /etc/config/network
+    > Modify in memory
+    > Write all at once to .tmp
+    < Verify .tmp not empty
+    > Atomic rename .tmp --> network (single OS call)
+    > If any step fails, .tmp deleted, original untouched
+```
+
+### Tagging In-Use Blocks
+
+Each modification wrapped in comments:
+
+```bash
+# wg-autoconf network start id 1
+config interface 'wg_home'
+    option proto 'wireguard'
+    option private_key 'eMD4...'
+    option addresses '10.2.0.2/32'
+# wg-autoconf network end id 1
+```
+
+Benefits:
+
+- Surgical removal (only tagged blocks deleted)
+- Multiple simultaneous setups (unique IDs per config)
+- Manual edits survive cleanup
+- Emergency recovery: `grep "wg-autoconf" /etc/config/*`
+
+### Backup Files
+
+```bash
+# Backup files (one per config):
+/etc/config/network.BACKUP_PRE_WIREGUARD
+/etc/config/dhcp.BACKUP_PRE_WIREGUARD
+/etc/config/firewall.BACKUP_PRE_WIREGUARD
+```
+
+Content:
+
+```
+# WG_AUTOCONF_BACKUP_1.0.0-r1_1708457600
+<original file contents>
+# WG_AUTOCONF_CHECKSUM: abc123def456...
+```
+
+**Checksum**: SHA256 of content (without markers). Validates integrity on restore.
+
+### Backup Operations
+
+```bash
+# List available backups
+wg-autoconf backups show
+
+# Restore latest backups
+wg-autoconf backups restore
+
+# Restore specific backup
+wg-autoconf backups restore network
+
+# Diagnose backup issues
+wg-autoconf backups diag network
+wg-autoconf backups diag firewall
+
+# Clean up valid backups
+wg-autoconf backups cleanup
+```
 
 ---
 
-## 10.  Boot Cleanup Service
+## 11. C Optimised Modules
+
+### Overview
+
+`wg-autoconf` 1.0.0-r1 includes native C modules for performance-critical operations.
+
+### Module List
+
+| Module | Function | Benefit |
+|---|---|---|
+| `wg-validator` | Configuration validation | 1000x faster than shell |
+| `wg-get_conf_value` | Parsing `.conf` files | Optimised file reading |
+| `wg-interface` | Interface control (up/down) | Atomic operations, faster |
+| `wg-route` | Routing management | 1000x speed improvement |
+| `wg-setup` | Setup and removal | Transaction-safe operations |
+
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph Shell["Shell Layer"]
+        SC["Shell Call"]
+        SH["chandler.sh<br/>C Handler Wrapper"]
+    end
+
+    subgraph Wrapper["C Handler Wrapper Functions"]
+        direction TB
+        F1["wg_c_validate_config()<br/>→ wg-validator"]
+        F2["wg_c_get_conf_value()<br/>→ wg-get_conf_value"]
+        F3["wg_c_activate_interface()<br/>→ wg-interface up"]
+        F4["wg_c_deactivate_interface()<br/>→ wg-interface down"]
+        F5["wg_c_set_lan_routes()<br/>→ wg-route set"]
+        F6["wg_c_unset_lan_routes()<br/>→ wg-route unset"]
+        F7["wg_c_setup_wireguard()<br/>→ wg-setup"]
+        F8["wg_c_remove_wireguard()<br/>→ wg-setup remove"]
+    end
+
+    subgraph C["C Binary Execution"]
+        direction LR
+        C1["Fast argument parsing"]
+        C2["Efficient file operations"]
+        C3["System calls"]
+        C4["Atomic operations"]
+    end
+
+    SC --> SH
+    SH --> F1
+    SH --> F2
+    SH --> F3
+    SH --> F4
+    SH --> F5
+    SH --> F6
+    SH --> F7
+    SH --> F8
+    F1 --> C
+    F2 --> C
+    F3 --> C
+    F4 --> C
+    F5 --> C
+    F6 --> C
+    F7 --> C
+    F8 --> C
+
+    classDef shell fill:#4A90D9,color:#fff,stroke:#2C5F8A,stroke-width:2px,rx:8px
+    classDef wrapper fill:#50B7A0,color:#fff,stroke:#2D7A6A,stroke-width:2px,rx:8px
+    classDef c fill:#E67E22,color:#fff,stroke:#B85E14,stroke-width:2px,rx:8px
+    classDef binary fill:#8E44AD,color:#fff,stroke:#5E3370,stroke-width:2px,rx:8px
+
+    class SC,SH shell
+    class F1,F2,F3,F4,F5,F6,F7,F8 wrapper
+    class C1,C2,C3,C4 binary
+```
+
+### Fallback System
+
+If C binaries are not available (e.g., during development):
+
+```bash
+# chandler.sh checks for C binaries
+if [ -f "$WG_VALIDATOR_BIN" ] && [ -x "$WG_VALIDATOR_BIN" ]; then
+    HAS_WG_VALIDATOR="yes"
+else
+    # Automatic fallback to shell functions
+    HAS_WG_VALIDATOR="no"
+fi
+
+# Each C function has a shell fallback
+wg_c_validate_config() {
+    [ "$HAS_WG_VALIDATOR" != "yes" ] && return 1
+    # ... C execution ...
+}
+```
+
+---
+
+## 12. Boot Cleanup Service
 
 ### Purpose
 
-Remove stale WireGuard configs on boot. Prevents orphaned interfaces + broken routing.
+Remove stale WireGuard configs on boot. Prevents orphaned interfaces and broken routing.
 
-### Behavior
+### Behaviour
 
 On each boot (BEFORE network startup finishes):
-    1. Read state file
-    2. Find all WireGuard interfaces
-    3. Remove UCI configs (network + firewall)
-    4. Flush routing tables
-    5. Remove rt_tables entries
-    6. Reset state file
+
+1. Read state file
+2. Find all WireGuard interfaces
+3. Remove UCI configs (network + firewall)
+4. Flush routing tables
+5. Remove `rt_tables` entries
+6. Reset state file
 
 ### Why Aggressive?
 
-Even though it can be executed at any time with the nuke command, even that name poses no danger whatsoever.
+Even though it can be executed at any time with the `nuke` command, even that name poses no danger whatsoever.
 
-By design, it is prefered to leave a clean system, with no garbage or remnants of old or unwanted configurations, **to avoid disaster (having to perform a hard brick).**   
-In my experience, also after consulting with other colleagues, many applications that modify network parameters tend to leave systems unstable when errors occur, or fail to clean up their own shit.
+By design, it is preferred to leave a clean system with no garbage or remnants of old or unwanted configurations, to avoid disaster (having to perform a hard brick).
 
-Also, after power loss or crash:
+After power loss or crash:
 
-    - Partial configs might exist
-    - Routing tables might have stale rules
-    - Firewall rules might be orphaned
-    - DNS might be broken
+- Partial configs might exist
+- Routing tables might have stale rules
+- Firewall rules might be orphaned
+- DNS might be broken
 
 For all possible disaster scenarios, it's safer to clear everything and let users manually recreate than to leave a broken state.
-
-### Disabling
-
-```bash
-/etc/init.d/wg-autoconf_boot_cleanup disable
-```
-
-**Trade-off:** You become responsible for manual cleanup after crashes.
 
 ### Service Location
 
@@ -769,19 +1215,39 @@ For all possible disaster scenarios, it's safer to clear everything and let user
 /etc/init.d/wg-autoconf_boot_cleanup
 ```
 
-Symlinked from init.d system (when package installed).
+### Disabling
+
+```bash
+/etc/init.d/wg-autoconf_boot_cleanup disable
+```
+
+**Trade-off**: You become responsible for manual cleanup after crashes.
+
+### Emergency Fallback
+
+If the main binary is not found, the boot service includes an emergency fallback:
+
+```bash
+# Emergency cleanup when wg-autoconf binary not found
+# 1. Remove WireGuard interfaces from ip link
+# 2. Clean WireGuard configurations from UCI
+# 3. Clean routing tables
+# 4. Restore configuration backups
+# 5. Commit UCI changes
+# 6. Clean state and debug files
+```
 
 ---
 
-## 11.  Multi-Interface Handling
+## 13. Multi-Interface Handling
 
 ### Multiple Clients + Multiple Routes
 
-**Problem:** When routing two clients to different LANs, firewall reload would clear NFTables rules for first client, causing connectivity loss.  
+**Problem**: When routing two clients to different LANs, firewall reload would clear NFTables rules for first client, causing connectivity loss.
 
-**Root Cause:** `set_lan_routes()` only re-added nftables rules for the **current** interface, not all WG interfaces.  
+**Root Cause**: `set_lan_routes()` only re-added nftables rules for the current interface, not all WG interfaces.
 
-**Solution:** After firewall reload, iterate **ALL wg* interfaces** (not just current) and re-add rules:  
+**Solution**: After firewall reload, iterate ALL wg interfaces (not just current) and re-add rules:
 
 ```bash
 # OLD (broken):
@@ -789,9 +1255,7 @@ nft add rule inet fw4 srcnat oifname "$wg_iface" jump "srcnat_$wg_iface"
 
 # NEW (fixed):
 for wg_iface_loop in $(grep "^[0-9]\+ wg" /etc/iproute2/rt_tables | awk '{print $2}'); do
-    
     nft add rule inet fw4 srcnat oifname "$wg_iface_loop" jump "srcnat_${wg_iface_loop}"
-
 done
 ```
 
@@ -800,8 +1264,8 @@ done
 Each server is independent:
 
 ```bash
-wg-autoconf server create  A         
-wg-autoconf server create  B       
+wg-autoconf server create A
+wg-autoconf server create B
 wg-autoconf up wg_server_A
 wg-autoconf up wg_server_B
 
@@ -809,35 +1273,56 @@ wg-autoconf up wg_server_B
 # Clients can connect to either
 ```
 
-No port conflicts because each server has unique LISTEN_PORT.
+No port conflicts because each server has unique `LISTEN_PORT`.
+
+### Multiple VPN Example
+
+```bash
+# Setup both VPNs
+wg-autoconf setup us-vpn
+wg-autoconf setup eu-vpn
+wg-autoconf up wg_us-vpn
+wg-autoconf up wg_eu-vpn
+
+# Route LAN3 through US VPN
+wg-autoconf routes set wg_us-vpn port3
+
+# Route LAN4 through EU VPN
+wg-autoconf routes set wg_eu-vpn port4
+
+# Verify
+wg-autoconf status
+wg-autoconf routes show
+```
 
 ---
 
+## 14. Design Decisions and Notes
 
-## 12.  Design Decisions & DEBUG! Notes
-
-#### DEBUG! rel5 - CLI Colours
+### CLI Colours
 
 ```bash
 # DEBUG! rel5
-# TODO: Test colours/escapes in older devices, different shells, etc
-# REASON: Different ASNI colour interpretation for older shells
-# POSSIBLE FIX?: Remove colours ... or try tput in openwrt or ... idk
+# TODO: Test colours/escapes in older devices, different shells
+# REASON: Different ANSI colour interpretation for older shells
 ```
 
-**Decision:** Keep colours but make them configurable.
+**Decision**: Keep colours but make them configurable.
 
-**Why?** ANSI codes can behave differently across busybox versions. Solution: `wg-autoconf settings set colours 0` to disable.
+```bash
+# Disable colours if needed
+wg-autoconf settings set colours 0
+```
 
-#### DEBUG! r7 - Ternaries & POSIX Compliance
+### POSIX Compliance
 
 ```bash
 # DEBUG! r7
-# TODO: Unified syntax: Ternaries, Arrays destructuring, echo and read -p VS printf
-# POSIX --> Test on many different Busybox-Ash shells
+# Unified syntax: Ternaries, Arrays destructuring, echo/read -p vs printf
+# POSIX → Test on many different Busybox-Ash shells
 ```
 
-**Decision:** Used `&&` / `||` for ternaries instead of `$(... && echo ...)`.
+**Decision**: Use `&&` / `||` for ternaries instead of `$(... && echo ...)`.
 
 ```bash
 # BAD (not POSIX)
@@ -847,7 +1332,7 @@ result=$([ -z "$x" ] && echo "empty" || echo "full")
 [ -z "$x" ] && result="empty" || result="full"
 ```
 
-#### DEBUG! r7 - Atomic Operations
+### Atomic Operations
 
 ```bash
 # Use atomic file handling to prevent corruption
@@ -855,9 +1340,9 @@ result=$([ -z "$x" ] && echo "empty" || echo "full")
 # Prevents partial writes if operation interrupted
 ```
 
-**Trade-off:** Slightly slower (reads full file each time) but prevents corruption.
+**Trade-off**: Slightly slower (reads full file each time) but prevents corruption.
 
-#### DEBUG! r7 - Boot Cleanup Lifecycle
+### Boot Cleanup Lifecycle
 
 ```bash
 # Boot cleanup is AGGRESSIVE
@@ -865,9 +1350,9 @@ result=$([ -z "$x" ] && echo "empty" || echo "full")
 # Trade-off: Prevents orphaned interfaces but requires manual recreation
 ```
 
-**Why aggressive?** After crash, better safe than sorry.
+Why aggressive? After crash, better safe than sorry.
 
-#### DEBUG! r5 - Tagging Strategy
+### Tagging Strategy
 
 ```bash
 # Tagged config blocks for surgical removal
@@ -877,29 +1362,36 @@ result=$([ -z "$x" ] && echo "empty" || echo "full")
 # # wg-autoconf <type> end id <N>
 ```
 
-**Why?** Allows removal of specific configs without touching manual edits. Essential for multi-interface support.
+Why? Allows removal of specific configs without touching manual edits. Essential for multi-interface support.
+
+### DNS Leakage Notice
+
+```bash
+# DNS Leakage Warning Helper
+dns_leakage() {
+    # Advises user about potential DNS issues
+    # Cases:
+    # 1. DNS = Local Address (without CIDR) - possible provider DNS
+    # 2. DNS in private/tunnel IP range
+    # 3. Unknown/insecure DNS
+    # Shows warnings, DOES NOT modify configuration
+}
+```
 
 ---
 
-## Performance Considerations
+## 15. Performance Considerations
 
 ### Slow Operations
 
-1. **Boot cleanup** (~2-5 seconds)
-   - Iterates all interfaces
-   - Removes configs
-   - Flushes tables
-   
-2. **Firewall reload** (~1-2 seconds)
-   - Rebuilds all NFTables chains
-   - Can't be parallelised (system limitation)
+| Operation | Time | Notes |
+|---|---|---|
+| Boot cleanup | ~2-5 seconds | Iterates all interfaces |
+| Firewall reload | ~1-2 seconds | Rebuilds all NFTables chains |
+| Routes set | ~1-2 seconds | Includes firewall reload |
+| Multiple routes set | Seconds per route | Each causes firewall reload |
 
-3. **Setting up multiple routes** (seconds per route)
-   - Each `routes set` causes firewall reload
-   - Multiple `routes set` calls = multiple reloads
-
-   
-### **Batch operations**
+### Batch Operations
 
 ```bash
 # Slow (3 firewall reloads):
@@ -911,35 +1403,40 @@ wg-autoconf routes set wg1 lan5
 # (Current implementation reloads per route, will be optimised)
 ```
 
-#### **Disable debug if not needed:**  
+### Optimisation Tips
 
-Debug functions were created for evaluations, being so much verbosed.  
-Comes disabled by default.  
-  
 ```bash
+# Disable debug if not needed (debug adds overhead)
 wg-autoconf debug off
-# Debug logging adds overhead
-```
 
-#### **Disable boot cleanup if not needed:**
-
-```bash
+# Disable boot cleanup if not needed
 /etc/init.d/wg-autoconf_boot_cleanup disable
 # Only if you won't be crashing and know/have manual cleanup
+
+# Use C modules (automatic, 1000x speed improvement)
+# C modules enabled by default when available
 ```
+
+### Performance Features
+
+- **C Modules**: 1000x performance improvement over pure shell
+- **Atomic Operations**: Safe but slightly slower
+- **State Caching**: State file read once per operation
+- **Tagged Blocks**: Quick surgical removal without full file scan
 
 ---
 
-## 13.  Some Troubleshooting
+## 16. Troubleshooting
 
 ### State File Corruption
 
-**Symptoms:**  
+**Symptoms:**
+
 - Commands fail with "state file not found" errors
 - State reads don't work
 
-**Diagnosis:**  
-   
+**Diagnosis:**
+
 ```bash
 # Check file permissions
 ls -la /usr/libexec/wg-autoconf/states
@@ -950,8 +1447,8 @@ head -20 /usr/libexec/wg-autoconf/states
 # Validate key-value format
 grep "^[A-Z_]*=" /usr/libexec/wg-autoconf/states | wc -l
 ```
- 
-**Fix:**  
+
+**Fix:**
 
 ```bash
 # Reset state
@@ -961,11 +1458,12 @@ wg-autoconf status  # Recreates empty state
 
 ### Routing Table Overflow
 
-**Symptoms:**  
+**Symptoms:**
+
 - "Cannot allocate routing table ID" errors
 - Can't add more VPN routes
 
-**Diagnosis:**  
+**Diagnosis:**
 
 ```bash
 cat /etc/iproute2/rt_tables | wc -l
@@ -975,7 +1473,7 @@ cat /etc/iproute2/rt_tables | wc -l
 sort /etc/iproute2/rt_tables | uniq -d
 ```
 
-**Fix:**  
+**Fix:**
 
 ```bash
 # Remove unused tables manually
@@ -989,27 +1487,25 @@ wg-autoconf nuke
 
 ### IP Rule Orphaning
 
-**Symptoms:**  
+**Symptoms:**
+
 - Firewall rules exist in nftables but `ip rule show` empty
 - OR `ip rule show` has orphaned rules
 
-**Diagnosis:**  
+**Diagnosis:**
 
 ```bash
 # View all rules
 ip rule show
 
-# Find orphaned rules (reference non-existent table)
+# Find orphaned rules
 for prio in $(ip rule show | grep -o '^[0-9]*:' | cut -d: -f1); do
-    
     table=$(ip rule show from all prio "$prio" | grep -o 'lookup [^ ]*' | awk '{print $2}')
-    
     [ -z "$table" ] && echo "Orphaned rule prio $prio"
-
-    done
+done
 ```
 
-**Fix:**  
+**Fix:**
 
 ```bash
 # Delete orphaned rules manually
@@ -1023,87 +1519,220 @@ ip rule flush
 
 ### NFTables Rules Missing
 
-**Symptoms:**  
+**Symptoms:**
+
 - Traffic stops after firewall reload
 - `nft list ruleset` shows no wg-autoconf rules
 
-**Diagnosis:**  
-```bash
-# Check if include files exist
-ls -la /etc/nftables.d/chain-post/srcnat/*.nft
-ls -la /etc/nftables.d/chain-post/forward/*.nft
+**Diagnosis:**
 
-# Check file contents
-cat /etc/nftables.d/chain-post/srcnat/95-*.nft
+```bash
+# Check if rules exist
+nft list ruleset | grep wg
+nft list ruleset | grep srcnat
 ```
 
-**Fix:**  
+**Fix:**
 
 ```bash
 # Recreate rules by re-running routes set
-wg-autoconf routes set wg_myconfig lan3
+wg-autoconf routes set wg_home lan3
 
-# Or manually check if directories exist
-mkdir -p /usr/share/nftables.d/chain-post/srcnat
-mkdir -p /usr/share/nftables.d/chain-post/forward
-
-
-# If files are missing but should exist, re-run setup
-wg-autoconf remove wg_myconfig
-wg-autoconf setup myconfig
-wg-autoconf up wg_myconfig
-wg-autoconf routes set wg_myconfig lan3
+# Or full re-setup
+wg-autoconf remove wg_home
+wg-autoconf setup home
+wg-autoconf up wg_home
+wg-autoconf routes set wg_home lan3
 ```
 
-### DNS Issues on VPN  
+### DNS Issues on VPN
 
-**Symptoms:**  
+**Symptoms:**
+
 - IP connectivity works but DNS queries fail
 - `ping 8.8.8.8` works but `ping google.com` fails
 
-**Diagnosis:**  
+**Diagnosis:**
 
 ```bash
 # Check if DNS set on interface
-uci show network.wg_myconfig.dns
-
-# Check if dnsmasq sees it
-uci show dhcp | grep wg_myconfig
+uci show network.wg_home.dns
 
 # Test with specific DNS
 dig @1.1.1.1 google.com
 
-# Check system resolver
-cat /etc/resolv.conf
+# Check DNS redirect
+uci show firewall | grep redirect | grep -i dns
 ```
 
-**Fix:**  
+**Fix:**
 
-1. **Check your DNS provider if works!**.  
-Even using a private/paid Wireguard provider, in many cases, the DNS route they provide NEVER WORKS (e.g. ProtonVPN assigns the tunnel gateway 10.x.0.1 IP as DNS ... almost never works, and must be changed!).
-
-2. Set DNS explicitly
 ```bash
-uci set network.wg_myconfig.dns='1.1.1.1 1.1.1.1'
+# Set DNS explicitly
+uci set network.wg_home.dns='1.1.1.1 8.8.8.8'
 uci commit network
+ifup wg_home
 
-ifup wg_myconfig
+# Or globally
+wg-autoconf settings set dns "1.1.1.1, 8.8.8.8"
 
-# Or globally in settings
-wg-autoconf settings set dns "1.1.1.1, 1.0.0.1"
+# Check DNS redirect
+wg-autoconf routes set wg_home lan3  # Re-adds DNS redirect
 ```
 
->**Be aware of when it MUST be COMMA-SEPARATED (.conf files) or space-separated (UCI commands).**
+### Interface Won't Come Up
+
+```bash
+# Validate configuration
+wg-autoconf test myconfig
+
+# Enable debug
+wg-autoconf debug on
+wg-autoconf up wg_myconfig --verbose
+wg-autoconf debug show
+
+# Check system logs
+logread | grep wg-autoconf
+```
+
+### Routes Configured But No Traffic
+
+```bash
+# Verify routing table exists
+ip route show table _vpn_wg_home_port3
+
+# Check IP rules
+ip rule show
+
+# Verify interface is UP
+wg show wg_home
+
+# Check firewall zones
+uci show firewall | grep wg_home
+
+# Check nftables rules
+nft list chain inet fw4 accept_to_wg_home
+```
+
+### Address Already In Use
+
+```bash
+# Find which interface has the IP
+grep -r "10.2.0.2" /etc/config/network
+
+# List all active interfaces
+wg-autoconf status
+
+# Use different IP in config file
+# Edit /etc/wireguard/home.conf
+# Change Address to new IP
+# Re-setup: wg-autoconf setup home
+```
+
+### Restore From Broken State
+
+```bash
+# View available backups
+wg-autoconf backups show
+
+# Restore latest
+wg-autoconf backups restore
+
+# If that fails, nuke and restart
+wg-autoconf nuke
+```
+
+### Debug Commands
+
+```bash
+# Enable debug
+wg-autoconf debug on
+
+# Show debug log
+wg-autoconf debug show
+
+# Live tail
+wg-autoconf debug live
+
+# View state
+wg-autoconf debug states
+
+# View network config
+wg-autoconf debug network
+
+# View firewall config
+wg-autoconf debug firewall
+
+# View routing tables
+wg-autoconf debug tables
+```
+
 ---
 
-## Development Notes
+## 17. File Locations
 
-TODO/CHANGELOG are available to proceed with a review
+### Configuration Files
 
-### States Diagram
+```
+/etc/wireguard/*.conf                            # WireGuard config files
 
-![](./DOCS/img/DIAGRAMS/STATE_MACHINE.png)
+/etc/config/network                              # Network interface configuration
+/etc/config/firewall                             # Firewall configuration
+/etc/config/dhcp                                 # DHCP/DNS configuration
 
+/etc/iproute2/rt_tables                          # Routing tables
+```
+
+### Runtime Files
+
+```
+/usr/libexec/wg-autoconf/
+├── states                                        # State machine file
+├── user_settings                                 # User configuration overrides
+├── debug/                                        # Debug logs
+│   └── wg-autoconf.log                          # Main debug log
+├── atomics/                                      # Atomic operation temporary files
+├── lib/                                          # C optimised modules
+│   ├── chandler.sh                              # C handler wrapper
+│   ├── wg-validator                             # Configuration validator
+│   ├── wg-get_conf_value                        # Config file parser
+│   ├── wg-interface                             # Interface controller
+│   ├── wg-route                                 # Route manager
+│   └── wg-setup                                 # Setup/removal manager
+└── configs/                                      # Generated server configs
+    └── <server_name>/
+        ├── server.conf                          # Server configuration
+        ├── <client1>.conf                       # Client configuration
+        └── <client2>.conf                       # Client configuration
+```
+
+### Backup Files
+
+```
+/etc/config/network.BACKUP_PRE_WIREGUARD          # Network config backup
+/etc/config/dhcp.BACKUP_PRE_WIREGUARD             # DHCP config backup
+/etc/config/firewall.BACKUP_PRE_WIREGUARD         # Firewall config backup
+```
+
+### Service Files
+
+```
+/etc/init.d/wg-autoconf_boot_cleanup              # Boot cleanup service
+```
+
+### Debug Logs
+
+```
+/usr/libexec/wg-autoconf/debug/
+├── wg-autoconf.log                               # Current debug log
+├── wg-autoconf-OLD-1.log                         # Rotated log
+├── wg-autoconf-OLD-2.log                         # Rotated log
+└── debug-state                                   # Debug state (on/off)
+```
+
+---
+
+## 18. Development Notes
 
 ### Code Organisation
 
@@ -1112,379 +1741,177 @@ wg-autoconf.source
 │
 ├─── GLOBALS & CONFIGURATION
 │    ├── VERSION & PATHS
-│    │    ├── version
-│    │    ├── global_config_file
-│    │    ├── user_config_dir
-│    │    ├── state_dir
-│    │    ├── backup_dir
-│    │    └── debug_log
-│    │
 │    └── DEFAULT_* VARIABLES
-│         ├── DEFAULT_LAN_INTERFACE
-│         ├── DEFAULT_PORT
-│         ├── DEFAULT_DNS
-│         ├── DEFAULT_MTU
-│         ├── DEFAULT_PERSISTENT_KEEPALIVE
-│         ├── DEFAULT_TABLE_PREFIX
-│         ├── DEFAULT_RULE_PRIORITY_MULTIPLIER
-│         └── DEFAULT_CONFIG_DIR
 │
 ├─── USER MANAGEMENT
 │    ├── create_default_user_settings()
 │    ├── load_user_settings()
-│    ├── save_user_settings()
-│    ├── validate_user_settings()
-│    └── reset_user_settings()
+│    └── save_user_settings()
 │
 ├─── UX/UI SYSTEM
-│    ├── COLOR VARIABLES (set based on settings)
-│    │    ├── COLOR_INFO
-│    │    ├── COLOR_SUCCESS
-│    │    ├── COLOR_WARNING
-│    │    ├── COLOR_ERROR
-│    │    ├── COLOR_DEBUG
-│    │    └── COLOR_RESET
-│    │
+│    ├── COLOR VARIABLES
 │    └── FORMATTING FUNCTIONS
-│         ├── ui_lines()
-│         ├── log()
-│         ├── success()
-│         ├── warning()
-│         ├── error()
-│         ├── debug()
-│         ├── die()
-│         ├── confirm_action()
-│         └── show_progress()
+│        ├── ui_lines()
+│        ├── log()
+│        ├── success()
+│        ├── warning()
+│        ├── error()
+│        └── debug()
 │
 ├─── SYSTEM VALIDATION
 │    ├── check_bins()
-│    │    ├── check_wg()
-│    │    ├── check_ip()
-│    │    ├── check_nft()
-│    │    ├── check_uci()
-│    │    ├── check_jq()
-│    │    └── check_iptables()
-│    │
 │    ├── check_kernel_modules()
-│    ├── check_openwrt_version()
-│    ├── check_dependencies()
 │    └── verify_system_compatibility()
 │
 ├─── HELPER FUNCTIONS
 │    ├── CONFIG PARSING
-│    │    ├── parse_endpoint()
-│    │    ├── allowed_ips_to_uci()
-│    │    ├── parse_wg_config()
-│    │    ├── validate_interface_name()
-│    │    ├── validate_ip_address()
-│    │    ├── validate_cidr()
-│    │    ├── validate_private_key()
-│    │    ├── validate_public_key()
-│    │    └── validate_preshared_key()
-│    │
+│    │   ├── parse_endpoint()
+│    │   ├── process_allowed_ips()
+│    │   └── validate_wg_config()
 │    ├── NETWORK HELPERS
-│    │    ├── netmask_to_cidr()
-│    │    ├── cidr_to_netmask()
-│    │    ├── ip_to_network()
-│    │    ├── ip_in_subnet()
-│    │    ├── get_interface_ip()
-│    │    ├── get_interface_netmask()
-│    │    ├── get_default_gateway()
-│    │    ├── get_available_subnet()
-│    │    ├── check_ip_collision()
-│    │    └── find_free_subnet()
-│    │
+│    │   ├── netmask_to_cidr()
+│    │   └── ip_to_network()
 │    ├── ATOMIC OPERATIONS
-│    │    ├── atomic_open()
-│    │    ├── atomic_write()
-│    │    ├── atomic_close()
-│    │    ├── create_lock()
-│    │    ├── release_lock()
-│    │    └── wait_for_lock()
-│    │
+│    │   ├── atomic_write()
+│    │   └── atomic_move()
 │    └── DNS MANAGEMENT
-│         ├── dns_leakage_noticer()
-│         ├── detect_dns_leak()
-│         ├── fix_dns_leak()
-│         ├── set_vpn_dns()
-│         ├── restore_system_dns()
-│         └── test_dns_resolution()
+│        └── dns_leakage()
 │
 ├─── UCI MANAGEMENT
 │    ├── uci_add_network()
-│    ├── uci_add_network_peer()
 │    ├── uci_delete_interface()
-│    ├── uci_delete_peer()
-│    ├── uci_commit_safe()
-│    ├── uci_rollback_on_failure()
-│    ├── uci_get_interface_list()
-│    ├── uci_get_peer_list()
-│    ├── uci_interface_exists()
-│    ├── uci_backup_config()
-│    └── uci_restore_config()
+│    └── uci_commit_safe()
 │
 ├─── ROUTING MANAGEMENT
 │    ├── add_routing_table()
 │    ├── remove_routing_table()
 │    ├── add_ip_rule()
-│    ├── remove_ip_rule()
-│    ├── list_ip_rules()
-│    ├── add_default_route()
-│    ├── remove_default_route()
-│    ├── flush_routing_cache()
-│    ├── get_table_id()
-│    ├── table_name_to_id()
-│    ├── id_to_table_name()
-│    └── validate_routing_table()
+│    └── remove_ip_rule()
 │
 ├─── FIREWALL MANAGEMENT
 │    ├── fw_create_zone()
 │    ├── fw_delete_zone()
 │    ├── fw_add_forwarding()
 │    ├── fw_remove_forwarding()
-│    ├── fw_add_rule()
-│    ├── fw_delete_rule()
-│    ├── fw_reload()
-│    ├── fw_backup()
-│    ├── fw_restore()
-│    ├── fw_add_nftables_workaround()
-│    └── fw_verify_rules()
+│    └── fw_reload_with_workaround()
 │
 ├─── STATE MACHINE
 │    ├── state_init()
 │    ├── state_read()
 │    ├── state_write()
-│    ├── state_delete()
-│    ├── state_get()
-│    ├── state_set()
-│    ├── state_unset()
-│    ├── state_list_all()
-│    ├── validate_state()
-│    ├── migrate_state()
-│    └── state_cleanup_stale()
+│    ├── state_get_id()
+│    ├── state_add_iface()
+│    ├── state_remove_iface()
+│    └── state_reset()
 │
 ├─── BACKUP SYSTEM
-│    ├── backup_create()
-│    │    ├── backup_network_config()
-│    │    ├── backup_firewall_config()
-│    │    ├── backup_state_files()
-│    │    └── backup_wireguard_keys()
-│    │
-│    ├── backup_restore()
-│    │    ├── restore_network_config()
-│    │    ├── restore_firewall_config()
-│    │    ├── restore_state_files()
-│    │    └── restore_wireguard_keys()
-│    │
-│    ├── backup_list()
-│    ├── backup_delete()
-│    ├── backup_verify()
-│    ├── backup_auto_prune()
-│    └── backup_auto_backup()
+│    ├── backup_config_file()
+│    ├── validate_backup()
+│    ├── restore_backups()
+│    └── cleanup_backup_files()
 │
 ├─── CORE OPERATIONS
-│    ├── SETUP/REMOVE
-│    │    ├── setup_wireguard()
-│    │    │    ├── parse_config_file()
-│    │    │    ├── validate_config()
-│    │    │    ├── check_collisions()
-│    │    │    ├── uci_create_interface()
-│    │    │    ├── uci_add_peers()
-│    │    │    └── state_write_setup()
-│    │    │
-│    │    ├── remove_wireguard()
-│    │    │    ├── verify_interface_exists()
-│    │    │    ├── prompt_confirmation()
-│    │    │    ├── uci_delete_all()
-│    │    │    ├── state_delete()
-│    │    │    └── cleanup_residual_files()
-│    │    │
-│    │    ├── deactivate_interface()
-│    │    │    ├── check_if_active()
-│    │    │    ├── ip_link_down()
-│    │    │    ├── ip_link_delete()
-│    │    │    └── state_set_inactive()
-│    │    │
-│    │    └── activate_interface()
-│    │         ├── read_state()
-│    │         ├── ip_link_add()
-│    │         ├── wg_set_private_key()
-│    │         ├── ip_addr_add()
-│    │         ├── ip_link_up()
-│    │         ├── wait_for_operational()
-│    │         └── state_set_active()
-│    │
-│    ├── ROUTES
-│    │    ├── set_lan_routes()
-│    │    │    ├── validate_interface_active()
-│    │    │    ├── create_routing_table()
-│    │    │    ├── add_ip_rules()
-│    │    │    ├── add_routes()
-│    │    │    ├── create_firewall_zone()
-│    │    │    ├── fw_reload_with_workaround()
-│    │    │    └── state_set_routed()
-│    │    │
-│    │    └── unset_lan_routes()
-│    │         ├── validate_interface_routed()
-│    │         ├── remove_ip_rules()
-│    │         ├── remove_routing_table()
-│    │         ├── delete_firewall_zone()
-│    │         ├── fw_reload()
-│    │         └── state_set_unrouted()
-│    │
-│    └── SERVER FUNCTIONS
-│         ├── server_create()
-│         │    ├── generate_server_keys()
-│         │    ├── create_server_config()
-│         │    ├── setup_server_interface()
-│         │    └── add_default_server_peer()
-│         │
-│         ├── server_add_user()
-│         │    ├── generate_client_keys()
-│         │    ├── create_client_config()
-│         │    ├── add_peer_to_server()
-│         │    └── show_qr_code()
-│         │
-│         ├── server_remove_user()
-│         │    ├── remove_peer_from_server()
-│         │    └── delete_client_config()
-│         │
-│         ├── server_list_users()
-│         ├── server_show_config()
-│         └── server_qr()
+│    ├── setup_wireguard()
+│    ├── remove_wireguard()
+│    ├── activate_interface()
+│    ├── deactivate_interface()
+│    ├── set_lan_routes()
+│    └── unset_lan_routes()
 │
-├─── TESTING & DIAGNOSTICS
-│    ├── test_connection()
-│    │    ├── ping_peer()
-│    │    ├── trace_route()
-│    │    └── bandwidth_test()
-│    │
-│    ├── status()
-│    │    ├── show_interface_status()
-│    │    ├── show_peer_status()
-│    │    ├── show_routing_status()
-│    │    ├── show_firewall_status()
-│    │    └── show_dns_status()
-│    │
-│    ├── diagnostics()
-│    │    ├── run_connectivity_tests()
-│    │    ├── check_dns_leaks()
-│    │    ├── check_mtu_issues()
-│    │    ├── check_handshake_status()
-│    │    └── generate_report()
-│    │
-│    └── monitor()
-│         ├── watch_interface()
-│         ├── watch_handshakes()
-│         └── watch_traffic()
+├─── SERVER FUNCTIONS
+│    ├── server_create()
+│    ├── server_add_user()
+│    ├── server_remove_user()
+│    └── server_list_users()
 │
 ├─── CLEANUP
 │    ├── cleanup()
-│    │    ├── remove_temp_files()
-│    │    ├── release_locks()
-│    │    ├── restore_traps()
-│    │    └── final_log()
-│    │
-│    ├── cleanup_stale_interfaces()
-│    ├── cleanup_stale_routes()
-│    ├── cleanup_stale_firewall_rules()
-│    ├── cleanup_stale_state_files()
-│    └── emergency_cleanup()
+│    └── upgrade_avoid_garbage()
 │
 ├─── DEBUG SYSTEM
 │    ├── debug_write()
 │    ├── debug_handler()
-│    ├── debug_set_level()
-│    ├── debug_enable()
-│    ├── debug_disable()
-│    ├── debug_dump_state()
-│    ├── debug_dump_config()
-│    └── debug_trace()
-│
-├─── UPGRADE SYSTEM
-│    ├── upgrade_check()
-│    │    ├── check_version()
-│    │    ├── fetch_latest_version()
-│    │    └── compare_versions()
-│    │
-│    ├── upgrade_backup()
-│    ├── upgrade_download()
-│    ├── upgrade_install()
-│    ├── upgrade_rollback()
-│    └── upgrade_migrate_config()
-│
-├─── MENUS & HELP
-│    ├── show_help()
-│    ├── show_usage()
-│    ├── show_version()
-│    ├── interactive_menu()
-│    ├── show_quickstart()
-│    ├── show_examples()
-│    ├── show_troubleshooting()
-│    └── show_credits()
+│    ├── debug_on()
+│    └── debug_off()
 │
 └─── MAIN DISPATCHER
      ├── parse_global_options()
      ├── validate_command()
-     ├── case statement on $cmd
-     │    ├── setup)
-     │    ├── up)
-     │    ├── down)
-     │    ├── nuke)
-     │    ├── routes)
-     │    │    ├── routes_set)
-     │    │    └── routes_clear)
-     │    ├── status)
-     │    ├── test)
-     │    ├── server)
-     │    │    ├── server_create)
-     │    │    ├── server_add)
-     │    │    ├── server_remove)
-     │    │    └── server_list)
-     │    ├── backup)
-     │    │    ├── backup_create)
-     │    │    ├── backup_restore)
-     │    │    └── backup_list)
-     │    ├── debug)
-     │    ├── upgrade)
-     │    └── help)
-     │
      └── execute_command()
 ```
 
-### Data Model in use
+### Data Model
 
 ![](./DOCS/img/DIAGRAMS/DB_MODEL.png)
 
----
+```mermaid
+graph TB
+    subgraph Data["Data Model"]
+        direction TB
+        
+        subgraph State["State File (/usr/libexec/wg-autoconf/states)"]
+            S1["IS_INSTALLED=1"]
+            S2["IS_FIRST_EXEC=1"]
+            S3["IS_PREV_TO_UPGRADE=0"]
+            S4["IS_UPGRADED=0"]
+            S5["ID_1_NAME=wg_home"]
+            S6["ID_1_IS_CREATED=1"]
+            S7["ID_1_IS_ACTIVE=1"]
+            S8["ID_1_IS_RT_TABLES_IN_USE=1"]
+        end
+        
+        subgraph UCI["UCI Configs"]
+            subgraph Network["/etc/config/network"]
+                N1["# wg-autoconf network start id 1"]
+                N2["config interface 'wg_home'"]
+                N3["    option proto 'wireguard'"]
+                N4["    option private_key '...'"]
+                N5["    option addresses '10.2.0.2/32'"]
+                N6["    option dns '1.1.1.1 1.0.0.1'"]
+                N7["# wg-autoconf network end id 1"]
+            end
+        end
+        
+        subgraph Routes["Routing Tables (/etc/iproute2/rt_tables)"]
+            R1["150 _vpn_wg_home_port3"]
+            R2["151 _vpn_wg_work_port4"]
+        end
+    end
+
+    classDef state fill:#F39C12,color:#fff,stroke:#D68910,stroke-width:2px,rx:4px
+    classDef uci fill:#2ECC71,color:#fff,stroke:#1A9C54,stroke-width:2px,rx:4px
+    classDef routes fill:#3498DB,color:#fff,stroke:#1F6F8F,stroke-width:2px,rx:4px
+    classDef comment fill:#7F8C8D,color:#fff,stroke:#5D6D7E,stroke-width:2px,rx:4px
+
+    class S1,S2,S3,S4,S5,S6,S7,S8 state
+    class N1,N7 comment
+    class N2,N3,N4,N5,N6 uci
+    class R1,R2 routes
+```
 
 ### Testing Strategy
 
-Manual testing on:  
+Manual testing on:
+
 - OpenWrt 25.12+ with APK enabled
 - Multiple device architectures (x86_64, aarch64, armv7)
 - Different busybox versions (1.35.0+)
 
-
 ### Known Limitations
 
-1. **Single Peer per WG Interface:** WireGuard limitation, not tool
-2. **No Key Rotation:** Manual updates required
-3. **No Web UI:** CLI only. **Pending a luci-proto-x module**
-4. **APK Only:** No Opkg version
+1. **Single Peer per WG Interface**: WireGuard limitation, not tool
+2. **No Key Rotation**: Manual updates required
+3. **No Web UI**: CLI only. Pending a `luci-proto-x` module
+4. **APK Only**: No Opkg version
 
 ---
 
 ## Issues
 
-Found issues? https://github.com/alexandrglm/openwrt_wg-autoconf/issues
-
----
+Found issues? Report at: [https://github.com/alexandrglm/openwrt_wg-autoconf/issues](https://github.com/alexandrglm/openwrt_wg-autoconf/issues)
 
 ## License
 
-MIT
+MIT License
 
 ---
-
-Made for OpenWrt with 🥰
